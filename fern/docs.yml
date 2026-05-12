@@ -1,14 +1,6 @@
 instances:
-  - url: gym.docs.buildwithfern.com/nemo/gym
+  - url: nvidia-gym.docs.buildwithfern.com/nemo/gym
     custom-domain: docs.nvidia.com/nemo/gym
-
-# missing-redirects requires FDR auth to compare against the published
-# nav; running it at `error` exits 1 in CI whenever DOCS_FERN_TOKEN can't
-# reach FDR (current state). Keep at `warn` until we have a working token,
-# then flip back to `error` to enforce.
-check:
-  rules:
-    missing-redirects: warn
 
 title: NeMo Gym
 
@@ -145,6 +137,14 @@ redirects:
     destination: "/latest/reference/configuration"
   - source: "/latest/environment-tutorials/designing-customer-evaluation"
     destination: "/latest/environment-tutorials"
+  - source: "/v0.2.1/environment-tutorials/real-world-data-generation"
+    destination: "/v0.2.1/environment-tutorials/real-world-environment/generating-training-data"
+  - source: "/v0.2.1/environment-tutorials/real-world-implementation"
+    destination: "/v0.2.1/environment-tutorials/real-world-environment/resources-server-implementation"
+  - source: "/latest/environment-tutorials/real-world-data-generation"
+    destination: "/latest/environment-tutorials/real-world-environment/generating-training-data"
+  - source: "/latest/environment-tutorials/real-world-implementation"
+    destination: "/latest/environment-tutorials/real-world-environment/resources-server-implementation"
   - source: "/v0.2/:path*"
     destination: "/v0.2.1/:path*"
   - source: "nemo/gym/latest/:path*/index.html"
