@@ -122,16 +122,16 @@ class ChatNeMoGym(BaseChatModel):
         """Call the configured Gym model server once.
 
         The request body starts from the original Gym `/v1/responses` body passed
-        through runtime `context` by `DecomposerGymMiddleware`. We replace only
+        through runtime `context` by `NeMoGymMiddleware`. We replace only
         `input` for the current model step and then apply kwargs bound by
         `create_agent`, mainly `tools` and `tool_choice`.
         """
         if stop:
             raise NotImplementedError("`ChatNeMoGym` does not support `stop` sequences yet.")
 
-        body = kwargs.pop("nemo_gym_request_body", None)
+        body = kwargs.pop("nemo_gym_body", None)
         if body is None:
-            raise RuntimeError("`ChatNeMoGym` expected `DecomposerGymMiddleware` to pass `nemo_gym_request_body`.")
+            raise RuntimeError("`ChatNeMoGym` expected `NeMoGymMiddleware` to pass `nemo_gym_body`.")
         body = NeMoGymResponseCreateParamsNonStreaming.model_validate(body).model_dump(exclude_unset=True)
         body["input"] = _messages_to_items(messages)
 
@@ -196,24 +196,24 @@ class ChatNeMoGym(BaseChatModel):
 
 
 @dataclass(frozen=True)
-class DecomposerGymContext:
-    request_body: NeMoGymResponseCreateParamsNonStreaming
+class NeMoGymContext:
+    body: NeMoGymResponseCreateParamsNonStreaming
 
 
-class DecomposerGymMiddleware(AgentMiddleware):
+class NeMoGymMiddleware(AgentMiddleware):
     def wrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse:
-        return handler(_request_with_gym_body(request))
+        return handler(_request_with_body(request))
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        return await handler(_request_with_gym_body(request))
+        return await handler(_request_with_body(request))
 
 
 class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
@@ -253,8 +253,8 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
                 model_server_name=self.config.model_server.name,
             ),
             subagent_types=self.config.subagent_types,
-            middleware=[DecomposerGymMiddleware()],
-            context_schema=DecomposerGymContext,
+            middleware=[NeMoGymMiddleware()],
+            context_schema=NeMoGymContext,
         )
 
     async def responses(
@@ -269,7 +269,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         initial_state = {"messages": input_messages}
         final_state = await self.graph.ainvoke(
             initial_state,
-            context=DecomposerGymContext(request_body=body),
+            context=NeMoGymContext(body=body),
         )
         all_messages = final_state["messages"]
         output_messages = all_messages[len(input_messages) :]
@@ -418,13 +418,13 @@ def _input_to_messages(input: str | NeMoGymResponseInput) -> list[BaseMessage]:
     return messages
 
 
-def _request_with_gym_body(request: ModelRequest) -> ModelRequest:
-    request_body = _item_get(request.runtime.context, "request_body")
-    if request_body is None:
-        raise RuntimeError("`DecomposerGymMiddleware` expected runtime `context.request_body`.")
+def _request_with_body(request: ModelRequest) -> ModelRequest:
+    body = _item_get(request.runtime.context, "body")
+    if body is None:
+        raise RuntimeError("`NeMoGymMiddleware` expected runtime `context.body`.")
 
     model_settings = dict(request.model_settings)
-    model_settings["nemo_gym_request_body"] = NeMoGymResponseCreateParamsNonStreaming.model_validate(request_body)
+    model_settings["nemo_gym_body"] = NeMoGymResponseCreateParamsNonStreaming.model_validate(body)
     return request.override(model_settings=model_settings)
 
 

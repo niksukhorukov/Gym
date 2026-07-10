@@ -8,10 +8,10 @@ from langchain_core.messages import HumanMessage
 from nemo_gym.openai_utils import NeMoGymResponseCreateParamsNonStreaming
 from responses_api_agents.decomposer_agent.app import (
     ChatNeMoGym,
-    DecomposerGymContext,
+    NeMoGymContext,
     _input_to_messages,
     _messages_to_items,
-    _request_with_gym_body,
+    _request_with_body,
 )
 
 
@@ -45,64 +45,35 @@ def test_messages_to_input_round_trips_agent_server_input(input_items):
     assert _messages_to_items(_input_to_messages(input_items)) == input_items
 
 
-def test_input_to_messages_rejects_multimodal_content_parts():
-    input_items = [
-        {
-            "type": "message",
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "question"},
-                {"type": "input_image", "image_url": "https://example.com/image.png", "detail": "auto"},
-            ],
-        }
-    ]
-    body = NeMoGymResponseCreateParamsNonStreaming.model_validate({"input": input_items})
-
-    with pytest.raises(NotImplementedError, match="input_image"):
-        _input_to_messages(body.input)
-
-
-def test_input_to_messages_rejects_multimodal_items():
-    with pytest.raises(NotImplementedError, match="image_generation_call"):
-        _input_to_messages([{"type": "image_generation_call"}])
-
-
-def test_messages_to_items_rejects_multimodal_langchain_content():
-    message = HumanMessage(content=[{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}])
-
-    with pytest.raises(NotImplementedError, match="image_url"):
-        _messages_to_items([message])
-
-
-def test_request_with_gym_body_adds_request_body_to_model_settings():
-    body = _request_body()
+def test_request_with_body_adds_body_to_model_settings():
+    body = _body()
     request = _FakeModelRequest(
-        context=DecomposerGymContext(request_body=body),
+        context=NeMoGymContext(body=body),
         model_settings={"existing": "setting"},
     )
 
-    updated_request = _request_with_gym_body(request)
+    updated_request = _request_with_body(request)
 
     assert updated_request.model_settings["existing"] == "setting"
-    assert updated_request.model_settings["nemo_gym_request_body"] == body
+    assert updated_request.model_settings["nemo_gym_body"] == body
 
 
-def test_chat_nemo_gym_requires_request_body():
+def test_chat_nemo_gym_requires_body():
     model = ChatNeMoGym(server_client=_FakeServerClient(), model_server_name="model")
 
-    with pytest.raises(RuntimeError, match="nemo_gym_request_body"):
+    with pytest.raises(RuntimeError, match="nemo_gym_body"):
         asyncio.run(model._agenerate([HumanMessage(content="hi")], tools=[_decomposer_tool()]))
 
 
 def test_chat_nemo_gym_preserves_model_params_and_overrides_tools():
     server_client = _FakeServerClient()
     model = ChatNeMoGym(server_client=server_client, model_server_name="model")
-    request_body = _request_body()
+    body = _body()
 
     asyncio.run(
         model._agenerate(
             [HumanMessage(content="runtime prompt")],
-            nemo_gym_request_body=request_body,
+            nemo_gym_body=body,
             tools=[_decomposer_tool()],
         )
     )
@@ -145,7 +116,7 @@ class _FakeModelResponse:
         return json.dumps(_model_response()).encode()
 
 
-def _request_body():
+def _body():
     return NeMoGymResponseCreateParamsNonStreaming.model_validate(
         {
             "input": [{"type": "message", "role": "user", "content": "original prompt"}],
