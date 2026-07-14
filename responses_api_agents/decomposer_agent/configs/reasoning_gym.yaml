@@ -1,0 +1,61 @@
+responses_create_params:
+  temperature: 1.0
+  top_p: 0.95
+  max_output_tokens: 5120
+
+reasoning_gym:
+  resources_servers:
+    reasoning_gym:
+      entrypoint: app.py
+      domain: knowledge
+      verified: true
+      description: Procedurally generated reasoning tasks.
+      value: Evaluate broad reasoning and generalization.
+
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: http://127.0.0.1:8011/v1
+      api_key: EMPTY
+      model: Qwen/Qwen3.6-27B
+      return_token_id_information: false
+      uses_reasoning_parser: true
+      uses_interleaved_reasoning: true
+      chat_template_kwargs:
+        preserve_thinking: true
+      extra_body:
+        top_k: 20
+        min_p: 0.0
+        repetition_penalty: 1.0
+        thinking_token_budget: 4096
+        include_reasoning: true
+
+reasoning_gym_decomposer_agent:
+  responses_api_agents:
+    decomposer_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: reasoning_gym
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      subagent_types:
+        - subagent_type_id: qwen3_5_4b
+          assistant_id: qwen3_5_4b
+          url: http://127.0.0.1:2024
+          description: A general-purpose subagent powered by Qwen3.5-4B.
+        - subagent_type_id: gemma_4_e4b
+          assistant_id: gemma_4_e4b
+          url: http://127.0.0.1:2024
+          description: A general-purpose subagent powered by Gemma-4-E4B.
+        - subagent_type_id: lfm2_5_8b_a1b
+          assistant_id: lfm2_5_8b_a1b
+          url: http://127.0.0.1:2024
+          description: A general-purpose subagent powered by LFM2.5-8B-A1B.
+      datasets:
+        - name: train
+          type: train
+          jsonl_fpath: resources_servers/reasoning_gym/data/train.jsonl
+          license: Apache 2.0
