@@ -68,19 +68,29 @@ safe_name() {
 }
 
 csv_to_lines() {
-  printf '%s' "$1" | tr ',' '\n' | sed '/^[[:space:]]*$/d'
+  printf '%s' "$1" | tr ',' '\n' | sed \
+    -e 's/^[[:space:]]*//' \
+    -e 's/[[:space:]]*$//' \
+    -e '/^$/d'
+}
+
+lines_to_csv() {
+  local IFS=,
+  printf '%s' "$*"
 }
 
 load_pair_config() {
   local model_slug="$1"
   local benchmark_slug="$2"
-  eval "$(
+  local pair_config
+  pair_config="$(
     python "$RESOLVER" emit-pair \
       --models-config "$MODELS_CONFIG" \
       --benchmarks-config "$BENCHMARKS_CONFIG" \
       --model "$model_slug" \
       --benchmark "$benchmark_slug"
-  )"
+  )" || return "$?"
+  eval "$pair_config"
 }
 
 validate_selected_configs() {
@@ -281,12 +291,12 @@ submit_one() {
 
   echo "Submitting $slug"
   quote_cmd "${env_cmd[@]}" "${submit_cmd[@]}"
-  local log_f="$SUBMIT_DIR/${slug}.submit.log"
-  local tmp="$SUBMIT_DIR/${slug}.submit.tmp"
   if [[ "$SUBMIT" -eq 0 ]]; then
-    printf "%s\tDRY_RUN\n" "$slug" >>"$JOBS"
     return 0
   fi
+
+  local log_f="$SUBMIT_DIR/${slug}.submit.log"
+  local tmp="$SUBMIT_DIR/${slug}.submit.tmp"
 
   set +e
   "${env_cmd[@]}" "${submit_cmd[@]}" 2>&1 | tee "$log_f" | tee "$tmp"
@@ -327,7 +337,7 @@ write_summary() {
 MODELS_CONFIG="${MODELS_CONFIG:-scripts/queue/config/models.yaml}"
 BENCHMARKS_CONFIG="${BENCHMARKS_CONFIG:-scripts/queue/config/benchmarks.yaml}"
 MODELS_CSV="${MODELS_CSV:-qwen35_4b,gemma4_e4b_it,lfm25_8b_a1b}"
-BENCHMARKS_CSV="${BENCHMARKS_CSV:-tau2,gpqa_diamond,browsecomp,arc_agi}"
+BENCHMARKS_CSV="${BENCHMARKS_CSV:-tau2,gpqa_diamond,arc_agi}"
 RUN_PREFIX="${RUN_PREFIX:-gym_matrix_$(date +%Y%m%d_%H%M%S)}"
 ROOT="${ROOT:-/home/jovyan/shares/SR006.nfs3/sukhorukov/gym_runs/$RUN_PREFIX}"
 IMAGE="${IMAGE:-cr.ai.cloud.ru/2e035251-1a08-4e54-8a69-d25931772e74/gym-vllm-cu129:0.1}"
@@ -386,12 +396,33 @@ mapfile -t MODELS < <(csv_to_lines "$MODELS_CSV")
 mapfile -t BENCHMARKS < <(csv_to_lines "$BENCHMARKS_CSV")
 [[ "${#MODELS[@]}" -gt 0 ]] || die "no models selected"
 [[ "${#BENCHMARKS[@]}" -gt 0 ]] || die "no benchmarks selected"
+MODELS_CSV="$(lines_to_csv "${MODELS[@]}")"
+BENCHMARKS_CSV="$(lines_to_csv "${BENCHMARKS[@]}")"
 [[ -f "$MODELS_CONFIG" ]] || die "missing models config: $MODELS_CONFIG"
 [[ -f "$BENCHMARKS_CONFIG" ]] || die "missing benchmarks config: $BENCHMARKS_CONFIG"
 
 validate_selected_configs
 
 GYM_BIN="$(resolve_gym_bin)"
+
+if [[ "$SUBMIT" -eq 0 ]]; then
+  echo "Run root: $ROOT"
+  echo "Mode: dry-run"
+  echo "Models: $MODELS_CSV"
+  echo "Benchmarks: $BENCHMARKS_CSV"
+
+  for benchmark_slug in "${BENCHMARKS[@]}"; do
+    prepare_benchmark_if_needed "$benchmark_slug"
+  done
+  for model_slug in "${MODELS[@]}"; do
+    for benchmark_slug in "${BENCHMARKS[@]}"; do
+      submit_one "$model_slug" "$benchmark_slug"
+    done
+  done
+
+  echo "Dry run complete; no files written."
+  exit 0
+fi
 
 mkdir -p "$ROOT" "$SUBMIT_DIR"
 : >"$JOBS"

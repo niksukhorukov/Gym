@@ -60,19 +60,29 @@ safe_name() {
 }
 
 csv_to_lines() {
-  printf '%s' "$1" | tr ',' '\n' | sed '/^[[:space:]]*$/d'
+  printf '%s' "$1" | tr ',' '\n' | sed \
+    -e 's/^[[:space:]]*//' \
+    -e 's/[[:space:]]*$//' \
+    -e '/^$/d'
+}
+
+lines_to_csv() {
+  local IFS=,
+  printf '%s' "$*"
 }
 
 load_pair_config() {
   local model_slug="$1"
   local benchmark_slug="$2"
-  eval "$(
+  local pair_config
+  pair_config="$(
     python "$RESOLVER" emit-pair \
       --models-config "$MODELS_CONFIG" \
       --benchmarks-config "$BENCHMARKS_CONFIG" \
       --model "$model_slug" \
       --benchmark "$benchmark_slug"
-  )"
+  )" || return "$?"
+  eval "$pair_config"
 }
 
 validate_selected_configs() {
@@ -225,6 +235,8 @@ mapfile -t MODELS < <(csv_to_lines "$MODELS_CSV")
 mapfile -t BENCHMARKS < <(csv_to_lines "$BENCHMARKS_CSV")
 [[ "${#MODELS[@]}" -gt 0 ]] || die "no models selected"
 [[ "${#BENCHMARKS[@]}" -gt 0 ]] || die "no benchmarks selected"
+MODELS_CSV="$(lines_to_csv "${MODELS[@]}")"
+BENCHMARKS_CSV="$(lines_to_csv "${BENCHMARKS[@]}")"
 [[ -f "$MODELS_CONFIG" ]] || die "missing models config: $MODELS_CONFIG"
 [[ -f "$BENCHMARKS_CONFIG" ]] || die "missing benchmarks config: $BENCHMARKS_CONFIG"
 

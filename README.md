@@ -174,6 +174,8 @@ This repository includes helper scripts for running repeated baseline evaluation
 
 The runners use each benchmark preset's defaults unless you pass `--limit` or `--num-repeats`. For `gpqa_diamond_full`, leave `--num-repeats` unset to keep the checked-in GPQA default of 8 repeats.
 
+The Cryri runner's default smoke matrix uses `tau2`, `gpqa_diamond`, and `arc_agi`, which do not require BrowseComp credentials. The `browsecomp` preset remains opt-in; queue users must separately provision its required configuration inside the job. A Cryri `--dry-run` prints all preparation and submission commands to stdout without creating or changing the requested run root.
+
 Always inspect commands before launching a long run:
 
 ```bash
