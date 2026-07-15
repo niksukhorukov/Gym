@@ -250,16 +250,6 @@ sandbox = [
     "opensandbox>=0.1.9",
 ]
 
-vllm = [
-    # vLLM: optional local model serving for GPU evaluation runs.
-    # Keep this aligned with responses_api_models/local_vllm_model/setup.py.
-    "vllm==0.20.0; sys_platform != 'darwin'",
-    "vllm==0.11.0; sys_platform == 'darwin'",
-
-    # hf_transfer: faster Hugging Face model downloads when HF_HUB_ENABLE_HF_TRANSFER=1.
-    "hf_transfer==0.1.9",
-]
-
 # We include dev dependencies as an extra since technically each server module is a consumer (which means we cannot use dependency groups, which are intended to be within a project).
 dev = [
     # Pre-commit: Used for pre-commit hooks.
