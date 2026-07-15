@@ -165,6 +165,73 @@ Aggregate metrics: results/mcqa_rollouts_aggregate_metrics.json
 
 For per-task pass rates, see the [`gym eval profile`](https://docs.nvidia.com/nemo/gym/main/reference/cli-commands) command.
 
+### Baseline Matrix Scripts
+
+This repository includes helper scripts for running repeated baseline evaluations with local vLLM serving or through the Cryri queue. The selected models and benchmark presets live in:
+
+- `scripts/queue/config/models.yaml` — model IDs, decoding parameters, vLLM flags, GPU memory use, and tool-parser flags. Explicit small-model mode slugs are `qwen35_2b_thinking`, `qwen35_2b_non_thinking`, `gemma4_e2b_it_thinking`, `gemma4_e2b_it_non_thinking`, `lfm25_1_2b_thinking`, and `lfm25_1_2b_instruct`. The older `qwen35_2b` and `gemma4_e2b_it` slugs remain compatibility aliases for their thinking profiles.
+- `scripts/queue/config/benchmarks.yaml` — smoke and full-run presets such as `gpqa_diamond_full`, `arc_agi_eval_full`, `reasoning_gym_train_full`, `workplace_assistant_validation_full`, and `calendar_validation_full`.
+
+The runners use each benchmark preset's defaults unless you pass `--limit` or `--num-repeats`. For `gpqa_diamond_full`, leave `--num-repeats` unset to keep the checked-in GPQA default of 8 repeats.
+
+Model entries can define an `extra_body` mapping for request parameters that do not have dedicated runner flags, such as `top_k`, `min_p`, repetition or presence penalties, and `thinking_token_budget`. The resolver validates the mapping and forwards it as one Hydra flow value to the vLLM model wrapper. Chat-template controls such as `enable_thinking` belong in the model profile's `VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64` environment value, which the runner decodes into vLLM's `--default-chat-template-kwargs` flag. The Qwen 3.5 2B thinking profile limits reasoning to 4096 tokens per model call and sets `VLLM_USE_V2_MODEL_RUNNER=0`, as vLLM 0.23 requires its V1 runner for thinking-budget enforcement.
+
+The Calendar simple agent has no step limit by default. If a reasoning parser returns reasoning without a final assistant message or function call, the agent normally requests another model response; a thinking model can therefore repeat reasoning indefinitely even when each call respects its thinking-token budget. For a one-call Calendar rerun, pass `--gym-start-extra-arg '++calendar_simple_agent.responses_api_agents.simple_agent.max_steps=1'` to `run_gym_baseline_job.sh`. This limit applies to each task and stops the agent after its first model response. It does not force the model to produce a final answer: reasoning-only responses are still recorded and scored normally. Keep this as a run-specific override when the standard Calendar behavior should remain unchanged.
+
+The Cryri runner's default smoke matrix uses `tau2`, `gpqa_diamond`, and `arc_agi`, which do not require BrowseComp credentials. The `browsecomp` preset remains opt-in; queue users must separately provision its required configuration inside the job. A Cryri `--dry-run` prints all preparation and submission commands to stdout without creating or changing the requested run root.
+
+Always inspect commands before launching a long run:
+
+```bash
+bash scripts/queue/run_gym_matrix.sh \
+  --models qwen35_4b,gemma4_e4b_it,lfm25_8b_a1b \
+  --benchmarks gpqa_diamond_full,arc_agi_eval_full \
+  --root /home/jovyan/shares/SR006.nfs3/sukhorukov/gym_runs/dryrun \
+  --no-prepare \
+  --dry-run
+```
+
+Run the same matrix locally, without Cryri:
+
+```bash
+bash scripts/queue/run_gym_local_matrix.sh \
+  --models qwen35_4b \
+  --benchmarks gpqa_diamond_full \
+  --root results/local_matrix/qwen_gpqa
+```
+
+If vLLM is already running, reuse it instead of starting a new server:
+
+```bash
+bash scripts/queue/run_gym_local_matrix.sh \
+  --models qwen35_4b \
+  --benchmarks gpqa_diamond_full \
+  --skip-vllm \
+  --model-url http://127.0.0.1:8000/v1 \
+  --model-api-key EMPTY
+```
+
+Submit queue jobs with `--submit`. Use a shared NFS3 output root so logs and results are visible from both the dispatcher and debug machines:
+
+```bash
+bash scripts/queue/run_gym_matrix.sh \
+  --models qwen35_4b,gemma4_e4b_it,lfm25_8b_a1b \
+  --benchmarks gpqa_diamond_full,arc_agi_eval_full \
+  --root /home/jovyan/shares/SR006.nfs3/sukhorukov/gym_full/baseline_$(date +%Y%m%d_%H%M%S) \
+  --no-prepare \
+  --max-active 12 \
+  --submit
+```
+
+Each run root contains `summary.md`, `jobs.tsv`, `submissions/`, `logs/<model>_<benchmark>/`, and `results/<model>/`. On the debug host, the same NFS3 path is typically visible under `/mnt/virtual_ai0001053-01336_SR006-nfs3/...`. The queue runner stops submitting new jobs if a tracked job fails or if free space drops below `--min-free-gb`.
+
+Monitor submitted jobs from `jobs.tsv` and the Cryri job list:
+
+```bash
+cat /home/jovyan/shares/SR006.nfs3/sukhorukov/gym_full/<run>/jobs.tsv
+cryri --jobs --region SR006
+```
+
 ### Next Steps
 
 - **[Browse Environments](#-available-environments)** — Browse available environments for evaluation and training.
