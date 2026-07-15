@@ -169,10 +169,14 @@ For per-task pass rates, see the [`gym eval profile`](https://docs.nvidia.com/ne
 
 This repository includes helper scripts for running repeated baseline evaluations with local vLLM serving or through the Cryri queue. The selected models and benchmark presets live in:
 
-- `scripts/queue/config/models.yaml` — model IDs, decoding parameters, vLLM flags, GPU memory use, and tool-parser flags.
+- `scripts/queue/config/models.yaml` — model IDs, decoding parameters, vLLM flags, GPU memory use, and tool-parser flags. Explicit small-model mode slugs are `qwen35_2b_thinking`, `qwen35_2b_non_thinking`, `gemma4_e2b_it_thinking`, `gemma4_e2b_it_non_thinking`, `lfm25_1_2b_thinking`, and `lfm25_1_2b_instruct`. The older `qwen35_2b` and `gemma4_e2b_it` slugs remain compatibility aliases for their thinking profiles.
 - `scripts/queue/config/benchmarks.yaml` — smoke and full-run presets such as `gpqa_diamond_full`, `arc_agi_eval_full`, `reasoning_gym_train_full`, `workplace_assistant_validation_full`, and `calendar_validation_full`.
 
 The runners use each benchmark preset's defaults unless you pass `--limit` or `--num-repeats`. For `gpqa_diamond_full`, leave `--num-repeats` unset to keep the checked-in GPQA default of 8 repeats.
+
+Model entries can define an `extra_body` mapping for request parameters that do not have dedicated runner flags, such as `top_k`, `min_p`, repetition or presence penalties, and `thinking_token_budget`. The resolver validates the mapping and forwards it as one Hydra flow value to the vLLM model wrapper. Chat-template controls such as `enable_thinking` belong in the model profile's `VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64` environment value, which the runner decodes into vLLM's `--default-chat-template-kwargs` flag. The Qwen 3.5 2B thinking profile limits reasoning to 4096 tokens per model call and sets `VLLM_USE_V2_MODEL_RUNNER=0`, as vLLM 0.23 requires its V1 runner for thinking-budget enforcement.
+
+The Calendar simple agent has no step limit by default. If a reasoning parser returns reasoning without a final assistant message or function call, the agent normally requests another model response; a thinking model can therefore repeat reasoning indefinitely even when each call respects its thinking-token budget. For a one-call Calendar rerun, pass `--gym-start-extra-arg '++calendar_simple_agent.responses_api_agents.simple_agent.max_steps=1'` to `run_gym_baseline_job.sh`. This limit applies to each task and stops the agent after its first model response. It does not force the model to produce a final answer: reasoning-only responses are still recorded and scored normally. Keep this as a run-specific override when the standard Calendar behavior should remain unchanged.
 
 The Cryri runner's default smoke matrix uses `tau2`, `gpqa_diamond`, and `arc_agi`, which do not require BrowseComp credentials. The `browsecomp` preset remains opt-in; queue users must separately provision its required configuration inside the job. A Cryri `--dry-run` prints all preparation and submission commands to stdout without creating or changing the requested run root.
 

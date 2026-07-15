@@ -100,8 +100,9 @@ benchmarks:
     description: Full Workplace Assistant validation split.
     kind: environment
     target: workplace_assistant
+    input: environments/workplace_assistant/data/validation.jsonl
     agent: workplace_assistant_simple_agent
-    split: validation
+    split: null
     limit: null
     num_repeats: 1
     tool_calls: true
@@ -113,8 +114,9 @@ benchmarks:
     description: Full Calendar validation split.
     kind: environment
     target: calendar
+    input: environments/calendar/data/validation.jsonl
     agent: calendar_simple_agent
-    split: validation
+    split: null
     limit: null
     num_repeats: 1
     gym_wait_timeout: 1200

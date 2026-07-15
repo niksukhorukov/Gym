@@ -20,6 +20,7 @@ Wrapper options:
   --dry-run                   Generate and print YAML without submitting.
   --image IMAGE               Container image. Also read from DOCKER_IMAGE.
   --copy-dir PATH             Cryri copy dir. Also read from COPY_DIR; default is SR006.nfs3.
+  --copy-exclude PATTERN      Add to the default Cryri copy exclusions (repeatable).
   --region REGION             Cryri region (default: SR006 or REGION env)
   --instance-type TYPE        Cryri instance type
   --priority PRIORITY         Cryri priority (default: medium)
@@ -110,6 +111,7 @@ PRIORITY="${PRIORITY:-medium}"
 DESCRIPTION="${DESCRIPTION:-Gym local-model baseline}"
 YAML_OUTPUT="${YAML_OUTPUT:-}"
 RUNNER_ARGS=()
+COPY_EXCLUDES=()
 
 # Capture the job environment only after loading configuration defaults.
 DEFAULT_HF_HOME="/home/jovyan/shares/SR006.nfs3/.cache/huggingface"
@@ -117,6 +119,7 @@ JOB_HF_HOME="${HF_HOME:-$DEFAULT_HF_HOME}"
 JOB_HF_HUB_CACHE="${HF_HUB_CACHE:-$JOB_HF_HOME/hub}"
 JOB_HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
 JOB_VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
+JOB_VLLM_USE_V2_MODEL_RUNNER="${VLLM_USE_V2_MODEL_RUNNER:-}"
 JOB_VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS="${VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS:-}"
 JOB_VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64="${VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64:-}"
 JOB_PYTHONPATH="${PYTHONPATH:-.:/workspace/Gym}"
@@ -127,6 +130,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) SUBMIT=0; shift ;;
     --image) require_value "$1" "${2-}"; DOCKER_IMAGE="$2"; shift 2 ;;
     --copy-dir) require_value "$1" "${2-}"; COPY_DIR="$2"; shift 2 ;;
+    --copy-exclude) require_value "$1" "${2-}"; COPY_EXCLUDES+=("$2"); shift 2 ;;
     --region) require_value "$1" "${2-}"; REGION="$2"; shift 2 ;;
     --instance-type) require_value "$1" "${2-}"; INSTANCE_TYPE="$2"; shift 2 ;;
     --priority) require_value "$1" "${2-}"; PRIORITY="$2"; shift 2 ;;
@@ -159,6 +163,31 @@ fi
 RUNNER_SCRIPT="scripts/queue/run_gym_baseline_job.sh"
 COMMAND="$(quote_cmd bash "$RUNNER_SCRIPT" "${RUNNER_ARGS[@]}")"
 
+DEFAULT_COPY_EXCLUDES=(
+  ".git"
+  ".venv"
+  "__pycache__"
+  ".pytest_cache"
+  ".ruff_cache"
+  ".mypy_cache"
+  ".cache"
+  "cache"
+  "shares"
+  "env.yaml"
+  ".env"
+  ".env.*"
+  "logs"
+  "outputs"
+  "results"
+  "resources_servers/mcqa/data/train.jsonl"
+  "resources_servers/*/.venv"
+  "responses_api_agents/*/.venv"
+  "responses_api_models/*/.venv"
+  "environments/*/.venv"
+  "resources_servers/*/data/train.jsonl"
+  "*.pyc"
+)
+
 {
   echo "container:"
   echo "  image: $(yaml_sq "$DOCKER_IMAGE")"
@@ -168,6 +197,9 @@ COMMAND="$(quote_cmd bash "$RUNNER_SCRIPT" "${RUNNER_ARGS[@]}")"
   echo "    HF_HUB_CACHE: $(yaml_sq "$JOB_HF_HUB_CACHE")"
   echo "    HF_XET_HIGH_PERFORMANCE: $(yaml_sq "$JOB_HF_XET_HIGH_PERFORMANCE")"
   echo "    VLLM_USE_FLASHINFER_SAMPLER: $(yaml_sq "$JOB_VLLM_USE_FLASHINFER_SAMPLER")"
+  if [[ -n "$JOB_VLLM_USE_V2_MODEL_RUNNER" ]]; then
+    echo "    VLLM_USE_V2_MODEL_RUNNER: $(yaml_sq "$JOB_VLLM_USE_V2_MODEL_RUNNER")"
+  fi
   if [[ -n "$JOB_VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS" ]]; then
     echo "    VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS: $(yaml_sq "$JOB_VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS")"
   fi
@@ -179,28 +211,9 @@ COMMAND="$(quote_cmd bash "$RUNNER_SCRIPT" "${RUNNER_ARGS[@]}")"
   echo "  run_from_copy: True"
   echo "  cry_copy_dir: $(yaml_sq "$COPY_DIR")"
   echo "  exclude_from_copy:"
-  echo "    - '.git'"
-  echo "    - '.venv'"
-  echo "    - '__pycache__'"
-  echo "    - '.pytest_cache'"
-  echo "    - '.ruff_cache'"
-  echo "    - '.mypy_cache'"
-  echo "    - '.cache'"
-  echo "    - 'cache'"
-  echo "    - 'shares'"
-  echo "    - 'env.yaml'"
-  echo "    - '.env'"
-  echo "    - '.env.*'"
-  echo "    - 'logs'"
-  echo "    - 'outputs'"
-  echo "    - 'results'"
-  echo "    - 'resources_servers/mcqa/data/train.jsonl'"
-  echo "    - 'resources_servers/*/.venv'"
-  echo "    - 'responses_api_agents/*/.venv'"
-  echo "    - 'responses_api_models/*/.venv'"
-  echo "    - 'environments/*/.venv'"
-  echo "    - 'resources_servers/*/data/train.jsonl'"
-  echo "    - '*.pyc'"
+  for pattern in "${DEFAULT_COPY_EXCLUDES[@]}" "${COPY_EXCLUDES[@]}"; do
+    echo "    - $(yaml_sq "$pattern")"
+  done
   echo "cloud:"
   echo "  region: $(yaml_sq "$REGION")"
   echo "  instance_type: $(yaml_sq "$INSTANCE_TYPE")"

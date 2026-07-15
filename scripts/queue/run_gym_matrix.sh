@@ -20,12 +20,15 @@ Common options:
   --limit N                    Override per-benchmark task limit
   --num-repeats N              Override per-benchmark repeat count
   --max-active N               Maximum active Cryri jobs (default: 12)
+  --max-workspace-active N     Submit only while total non-terminal Cryri jobs are below N.
   --submit                     Submit jobs. Default is dry-run.
   --dry-run                    Validate and print commands without submitting.
+  --resume                     Continue an existing submit root without duplicating tracked jobs.
   --prepare / --no-prepare     Run cached benchmark preparation first (default: prepare)
   --wait-complete              Keep watching after all jobs are submitted.
   --image IMAGE                Cryri container image
   --copy-dir PATH              Cryri copy directory
+  --copy-exclude PATTERN       Add a Cryri copy exclusion (repeatable)
   --region REGION              Cryri region (default: SR006)
   --instance-type TYPE         Cryri instance type
   --priority PRIORITY          Cryri priority (default: medium)
@@ -155,9 +158,19 @@ active_count() {
   while IFS=$'\t' read -r slug id; do
     [[ -n "${id:-}" ]] || continue
     status="$(status_for_job "$id")"
-    [[ "$status" == "Running" ]] && count=$((count + 1))
+    case "$status" in
+      Completed|Succeeded|Failed|Cancelled) ;;
+      *) count=$((count + 1)) ;;
+    esac
   done <"$JOBS"
   printf "%s" "$count"
+}
+
+workspace_active_count() {
+  awk -F " : " '
+    $2 ~ /^lm-mpi-job-/ && $3 !~ /^(Completed|Succeeded|Failed|Cancelled)$/ {count++}
+    END {print count + 0}
+  ' "$STATUS_FPATH"
 }
 
 unfinished_count() {
@@ -227,6 +240,7 @@ submit_one() {
     --gym-wait-timeout "$gym_wait_timeout"
   )
   [[ -n "$MODEL_TOP_P" ]] && runner_args+=(--top-p "$MODEL_TOP_P")
+  [[ -n "$MODEL_EXTRA_BODY" ]] && runner_args+=(--model-extra-body "$MODEL_EXTRA_BODY")
   [[ -n "$limit" ]] && runner_args+=(--limit "$limit")
   [[ -n "$repeats" ]] && runner_args+=(--num-repeats "$repeats")
 
@@ -283,6 +297,9 @@ submit_one() {
     --description "Gym ${model_slug} ${benchmark_slug}"
     "${runner_args[@]}"
   )
+  for arg in "${COPY_EXCLUDES[@]}"; do
+    submit_cmd+=(--copy-exclude "$arg")
+  done
 
   local env_cmd=()
   if [[ "${#MODEL_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
@@ -302,6 +319,11 @@ submit_one() {
   "${env_cmd[@]}" "${submit_cmd[@]}" 2>&1 | tee "$log_f" | tee "$tmp"
   local rc=${PIPESTATUS[0]}
   set -e
+  if grep -q "WORKSPACE_GPU_LIMIT_REACHED" "$tmp"; then
+    rm -f "$tmp"
+    echo "Cryri capacity was claimed before submission; keeping $slug pending."
+    return 75
+  fi
   if [[ "$rc" -ne 0 ]]; then
     die "submission failed for $slug rc=$rc"
   fi
@@ -325,6 +347,7 @@ write_summary() {
     echo "- Limit override: ${LIMIT_OVERRIDE:-default}"
     echo "- Repeats override: ${NUM_REPEATS_OVERRIDE:-default}"
     echo "- Max active jobs: $MAX_ACTIVE"
+    echo "- Max workspace active jobs: ${MAX_WORKSPACE_ACTIVE:-unbounded}"
     echo
     echo "## Jobs"
     echo
@@ -346,6 +369,7 @@ REGION="${REGION:-SR006}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-a100plus.1gpu.80vG.12C.96G}"
 PRIORITY="${PRIORITY:-medium}"
 MAX_ACTIVE="${MAX_ACTIVE:-12}"
+MAX_WORKSPACE_ACTIVE="${MAX_WORKSPACE_ACTIVE:-}"
 MIN_FREE_GB="${MIN_FREE_GB:-50}"
 POLL_SECONDS="${POLL_SECONDS:-120}"
 ENV_YAML="${ENV_YAML:-env.yaml}"
@@ -355,6 +379,8 @@ SUBMIT=0
 DO_PREPARE=1
 WAIT_COMPLETE=0
 SKIP_CREDENTIAL_CHECK=0
+RESUME=0
+COPY_EXCLUDES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -364,8 +390,10 @@ while [[ $# -gt 0 ]]; do
     --limit) require_value "$1" "${2-}"; LIMIT_OVERRIDE="$2"; shift 2 ;;
     --num-repeats) require_value "$1" "${2-}"; NUM_REPEATS_OVERRIDE="$2"; shift 2 ;;
     --max-active) require_value "$1" "${2-}"; MAX_ACTIVE="$2"; shift 2 ;;
+    --max-workspace-active) require_value "$1" "${2-}"; MAX_WORKSPACE_ACTIVE="$2"; shift 2 ;;
     --image) require_value "$1" "${2-}"; IMAGE="$2"; shift 2 ;;
     --copy-dir) require_value "$1" "${2-}"; COPY_DIR="$2"; shift 2 ;;
+    --copy-exclude) require_value "$1" "${2-}"; COPY_EXCLUDES+=("$2"); shift 2 ;;
     --region) require_value "$1" "${2-}"; REGION="$2"; shift 2 ;;
     --instance-type) require_value "$1" "${2-}"; INSTANCE_TYPE="$2"; shift 2 ;;
     --priority) require_value "$1" "${2-}"; PRIORITY="$2"; shift 2 ;;
@@ -376,6 +404,7 @@ while [[ $# -gt 0 ]]; do
     --min-free-gb) require_value "$1" "${2-}"; MIN_FREE_GB="$2"; shift 2 ;;
     --submit) SUBMIT=1; shift ;;
     --dry-run) SUBMIT=0; shift ;;
+    --resume) RESUME=1; shift ;;
     --prepare) DO_PREPARE=1; shift ;;
     --no-prepare) DO_PREPARE=0; shift ;;
     --wait-complete) WAIT_COMPLETE=1; shift ;;
@@ -403,6 +432,10 @@ BENCHMARKS_CSV="$(lines_to_csv "${BENCHMARKS[@]}")"
 
 validate_selected_configs
 
+if [[ "$RESUME" -eq 1 && "$SUBMIT" -eq 0 ]]; then
+  die "--resume requires --submit"
+fi
+
 GYM_BIN="$(resolve_gym_bin)"
 
 if [[ "$SUBMIT" -eq 0 ]]; then
@@ -425,11 +458,19 @@ if [[ "$SUBMIT" -eq 0 ]]; then
 fi
 
 mkdir -p "$ROOT" "$SUBMIT_DIR"
-: >"$JOBS"
+if [[ "$RESUME" -eq 1 ]]; then
+  touch "$JOBS"
+else
+  : >"$JOBS"
+fi
 : >"$PENDING"
 
 for model_slug in "${MODELS[@]}"; do
   for benchmark_slug in "${BENCHMARKS[@]}"; do
+    slug="${model_slug}_${benchmark_slug}"
+    if [[ "$RESUME" -eq 1 ]] && awk -F $'\t' -v slug="$slug" '$1 == slug {found=1} END {exit !found}' "$JOBS"; then
+      continue
+    fi
     printf "%s\t%s\n" "$model_slug" "$benchmark_slug" >>"$PENDING"
   done
 done
@@ -457,18 +498,27 @@ while [[ -s "$PENDING" ]]; do
       die "a tracked job failed"
     fi
     active="$(active_count)"
+    workspace_active="$(workspace_active_count)"
   else
     active=0
+    workspace_active=0
   fi
 
-  if [[ "$active" -lt "$MAX_ACTIVE" ]]; then
+  if [[ "$active" -lt "$MAX_ACTIVE" ]] && {
+    [[ -z "$MAX_WORKSPACE_ACTIVE" ]] || [[ "$workspace_active" -lt "$MAX_WORKSPACE_ACTIVE" ]]
+  }; then
     IFS=$'\t' read -r model_slug benchmark_slug <"$PENDING"
-    tail -n +2 "$PENDING" >"$PENDING.tmp"
-    mv "$PENDING.tmp" "$PENDING"
-    submit_one "$model_slug" "$benchmark_slug"
-    write_summary
+    if submit_one "$model_slug" "$benchmark_slug"; then
+      tail -n +2 "$PENDING" >"$PENDING.tmp"
+      mv "$PENDING.tmp" "$PENDING"
+      write_summary
+    else
+      rc=$?
+      [[ "$rc" -eq 75 ]] || exit "$rc"
+      sleep "$POLL_SECONDS"
+    fi
   else
-    echo "active=$active pending=$(wc -l <"$PENDING"); sleeping ${POLL_SECONDS}s"
+    echo "active=$active workspace_active=$workspace_active pending=$(wc -l <"$PENDING"); sleeping ${POLL_SECONDS}s"
     sleep "$POLL_SECONDS"
   fi
 done

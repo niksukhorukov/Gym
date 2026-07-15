@@ -48,6 +48,20 @@ def emit_env(name: str, env: Any) -> None:
     emit_array(name, [f"{k}={v}" for k, v in env.items()])
 
 
+def hydra_flow_mapping(value: Any, *, field: str) -> str:
+    """Validate and serialize an optional mapping as one Hydra flow value."""
+    if value is None:
+        return ""
+    if not isinstance(value, dict):
+        raise SystemExit(f"{field} must be a mapping")
+    if not value:
+        return ""
+    if any(not isinstance(key, str) for key in value):
+        raise SystemExit(f"{field} keys must be strings")
+
+    return yaml.safe_dump(value, default_flow_style=True, sort_keys=False, width=sys.maxsize).strip()
+
+
 def get_path(root: dict[str, Any], dotted: str) -> Any:
     cur: Any = root
     for part in dotted.split("."):
@@ -75,6 +89,7 @@ def emit_pair(args: argparse.Namespace) -> None:
     emit_value("MODEL_PIPELINE_PARALLEL_SIZE", model.get("pipeline_parallel_size", ""))
     emit_value("MODEL_VLLM_WAIT_TIMEOUT", model.get("vllm_wait_timeout", ""))
     emit_value("MODEL_GYM_WAIT_TIMEOUT", model.get("gym_wait_timeout", ""))
+    emit_value("MODEL_EXTRA_BODY", hydra_flow_mapping(model.get("extra_body"), field="model extra_body"))
     emit_array("MODEL_VLLM_EXTRA_ARGS", model.get("vllm_extra_args"))
     emit_array("MODEL_TOOL_VLLM_EXTRA_ARGS", model.get("tool_vllm_extra_args"))
     emit_env("MODEL_ENV_ASSIGNMENTS", model.get("env"))
@@ -111,9 +126,14 @@ def validate_selection(args: argparse.Namespace) -> None:
 
     for model_slug in csv_values(args.models):
         try:
-            merged(models_cfg, "models", model_slug)
-        except SystemExit:
-            errors.append(f"unknown model slug: {model_slug}")
+            model = merged(models_cfg, "models", model_slug)
+        except SystemExit as exc:
+            errors.append(str(exc))
+            continue
+        try:
+            hydra_flow_mapping(model.get("extra_body"), field=f"{model_slug}: extra_body")
+        except SystemExit as exc:
+            errors.append(str(exc))
 
     for bench_slug in csv_values(args.benchmarks):
         try:

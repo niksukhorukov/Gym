@@ -29,6 +29,7 @@ Common options:
   --concurrency N                   Rollout concurrency (default: 1)
   --temperature FLOAT               Sampling temperature (default: 0)
   --top-p FLOAT                     Sampling top-p
+  --model-extra-body MAPPING        Hydra flow mapping forwarded to the vLLM model wrapper
   --max-output-tokens N             Maximum generated tokens
   --cuda-visible-devices IDS        CUDA_VISIBLE_DEVICES value (default: 1)
   --skip-vllm                       Use an already-running endpoint
@@ -155,6 +156,7 @@ SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-}"
 CONCURRENCY="${CONCURRENCY:-1}"
 TEMPERATURE="${TEMPERATURE:-0}"
 TOP_P="${TOP_P:-}"
+MODEL_EXTRA_BODY="${MODEL_EXTRA_BODY:-}"
 MAX_OUTPUT_TOKENS="${MAX_OUTPUT_TOKENS:-}"
 LIMIT="${LIMIT:-}"
 NUM_REPEATS="${NUM_REPEATS:-}"
@@ -199,6 +201,7 @@ while [[ $# -gt 0 ]]; do
     --concurrency) require_value "$1" "${2-}"; CONCURRENCY="$2"; shift 2 ;;
     --temperature) require_value "$1" "${2-}"; TEMPERATURE="$2"; shift 2 ;;
     --top-p) require_value "$1" "${2-}"; TOP_P="$2"; shift 2 ;;
+    --model-extra-body) require_value "$1" "${2-}"; MODEL_EXTRA_BODY="$2"; shift 2 ;;
     --max-output-tokens) require_value "$1" "${2-}"; MAX_OUTPUT_TOKENS="$2"; shift 2 ;;
     --cuda-visible-devices) require_value "$1" "${2-}"; CUDA_VISIBLE_DEVICES_VALUE="$2"; shift 2 ;;
     --vllm-host) require_value "$1" "${2-}"; VLLM_HOST="$2"; shift 2 ;;
@@ -425,6 +428,11 @@ append_if_set COMMON_EVAL_ARGS --top-p "$TOP_P"
 append_if_set COMMON_EVAL_ARGS --max-output-tokens "$MAX_OUTPUT_TOKENS"
 COMMON_EVAL_ARGS+=("${GYM_EXTRA_ARGS[@]}")
 
+MODEL_EXTRA_BODY_ARG=()
+if [[ -n "$MODEL_EXTRA_BODY" ]]; then
+  MODEL_EXTRA_BODY_ARG=("++policy_model.responses_api_models.vllm_model.extra_body=${MODEL_EXTRA_BODY}")
+fi
+
 if [[ -n "$INPUT" ]]; then
   if [[ "$REUSE_GYM_SERVERS" -eq 0 && "$DRY_RUN" -eq 0 ]]; then
     if curl -sf "http://127.0.0.1:${HEAD_PORT}/server_instances" >/dev/null 2>&1; then
@@ -442,6 +450,7 @@ if [[ -n "$INPUT" ]]; then
       --model "$MODEL"
       --model-url "$MODEL_URL"
       --model-api-key "$MODEL_API_KEY"
+      "${MODEL_EXTRA_BODY_ARG[@]}"
       "${GYM_START_EXTRA_ARGS[@]}"
     )
     echo "Gym server command:"
@@ -472,6 +481,7 @@ else
     --model "$MODEL"
     --model-url "$MODEL_URL"
     --model-api-key "$MODEL_API_KEY"
+    "${MODEL_EXTRA_BODY_ARG[@]}"
     "${COMMON_EVAL_ARGS[@]}"
   )
   append_if_set EVAL_CMD --split "$SPLIT"

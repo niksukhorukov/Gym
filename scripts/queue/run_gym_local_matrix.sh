@@ -138,6 +138,7 @@ run_one() {
   )
   [[ "$SKIP_VLLM" -eq 1 ]] && runner_args+=(--skip-vllm --model-url "$MODEL_URL")
   [[ -n "$MODEL_TOP_P" ]] && runner_args+=(--top-p "$MODEL_TOP_P")
+  [[ -n "$MODEL_EXTRA_BODY" ]] && runner_args+=(--model-extra-body "$MODEL_EXTRA_BODY")
   [[ -n "$limit" ]] && runner_args+=(--limit "$limit")
   [[ -n "$repeats" ]] && runner_args+=(--num-repeats "$repeats")
 
