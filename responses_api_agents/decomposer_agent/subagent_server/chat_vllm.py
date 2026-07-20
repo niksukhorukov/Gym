@@ -10,7 +10,7 @@ from pydantic import Field
 class ChatVLLM(ChatOpenAI):
     """ChatOpenAI adapter for vLLM's Chat Completions reasoning field."""
 
-    preserve_tool_call_reasoning: bool = Field(default=False, exclude=True)
+    preserve_reasoning: bool = Field(default=False, exclude=True)
 
     def _create_chat_result(
         self,
@@ -24,7 +24,7 @@ class ChatVLLM(ChatOpenAI):
             if choice.get("finish_reason") == "length":
                 raise RuntimeError("vLLM exhausted max_completion_tokens before completing its response.")
 
-        if not self.preserve_tool_call_reasoning:
+        if not self.preserve_reasoning:
             return result
 
         for generation, choice in zip(result.generations, response_dict.get("choices") or [], strict=True):
@@ -34,7 +34,7 @@ class ChatVLLM(ChatOpenAI):
             if reasoning is None:
                 reasoning = response_message.get("reasoning_content")
 
-            if isinstance(message, AIMessage) and message.tool_calls and isinstance(reasoning, str) and reasoning:
+            if isinstance(message, AIMessage) and isinstance(reasoning, str) and reasoning:
                 message.additional_kwargs["reasoning"] = reasoning
 
         return result
@@ -49,18 +49,15 @@ class ChatVLLM(ChatOpenAI):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         request_messages = payload.get("messages")
         if not isinstance(request_messages, list):
-            raise RuntimeError(
-                "VLLMChatOpenAI requires the Chat Completions API; vLLM's "
-                "Responses API does not enforce thinking_token_budget."
-            )
+            raise RuntimeError("ChatVLLM requires the Chat Completions API.")
 
-        if not self.preserve_tool_call_reasoning:
+        if not self.preserve_reasoning:
             return payload
 
         messages = self._convert_input(input_).to_messages()
         for message, request_message in zip(messages, request_messages, strict=True):
             reasoning = message.additional_kwargs.get("reasoning")
-            if isinstance(message, AIMessage) and message.tool_calls and reasoning:
+            if isinstance(message, AIMessage) and isinstance(reasoning, str) and reasoning:
                 request_message["reasoning"] = reasoning
 
         return payload

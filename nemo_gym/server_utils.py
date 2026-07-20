@@ -164,6 +164,11 @@ DISCONNECTED_CLIENT_OS_HELP_TEXT = """We've run into this issue in two different
 async def request(
     method: str, url: str, _internal: bool = False, **kwargs: Unpack[_RequestOptions]
 ) -> ClientResponse:  # pragma: no cover
+    if not _internal and url.startswith("https://openrouter.ai/") and "proxy" not in kwargs:
+        proxy = getenv("https_proxy") or getenv("HTTPS_PROXY")
+        if proxy:
+            kwargs["proxy"] = proxy
+
     # Faster JSON dumps than the default aiohttp json
     if kwargs.get("json"):
         kwargs["data"] = orjson.dumps(kwargs.pop("json"))

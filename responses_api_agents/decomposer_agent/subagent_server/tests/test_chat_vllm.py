@@ -7,16 +7,15 @@ from openai.types.chat import ChatCompletion
 from chat_vllm import ChatVLLM
 
 
-def _model(*, preserve_tool_call_reasoning: bool) -> ChatVLLM:
+def _model(*, preserve_reasoning: bool) -> ChatVLLM:
     return ChatVLLM(
         model="test",
         api_key="EMPTY",
         base_url="http://127.0.0.1:1/v1",
-        max_tokens=5120,
+        max_tokens=2048,
         disable_streaming=True,
         use_responses_api=False,
-        preserve_tool_call_reasoning=preserve_tool_call_reasoning,
-        extra_body={"thinking_token_budget": 4096},
+        preserve_reasoning=preserve_reasoning,
     )
 
 
@@ -65,7 +64,7 @@ def _tool_call_response(
 
 @pytest.mark.parametrize("typed_response", [False, True])
 def test_captures_and_replays_tool_call_reasoning(typed_response: bool) -> None:
-    model = _model(preserve_tool_call_reasoning=True)
+    model = _model(preserve_reasoning=True)
     response: dict[str, Any] | ChatCompletion = _tool_call_response()
     if typed_response:
         response = ChatCompletion.model_validate(response)
@@ -85,12 +84,11 @@ def test_captures_and_replays_tool_call_reasoning(typed_response: bool) -> None:
 
     assert payload["messages"][1]["reasoning"] == "Use the calculator."
     assert payload["messages"][1]["tool_calls"][0]["function"]["name"] == "multiply"
-    assert payload["extra_body"]["thinking_token_budget"] == 4096
-    assert payload["max_completion_tokens"] == 5120
+    assert payload["max_completion_tokens"] == 2048
 
 
-def test_does_not_capture_final_answer_reasoning() -> None:
-    model = _model(preserve_tool_call_reasoning=True)
+def test_captures_and_replays_final_answer_reasoning() -> None:
+    model = _model(preserve_reasoning=True)
     response = _tool_call_response()
     response["choices"][0]["message"] = {
         "role": "assistant",
@@ -102,13 +100,23 @@ def test_does_not_capture_final_answer_reasoning() -> None:
     message = model._create_chat_result(response).generations[0].message
 
     assert message.content == "The answer is 42."
-    assert "reasoning" not in message.additional_kwargs
+    assert message.additional_kwargs["reasoning"] == "Six times seven is 42."
+
+    payload = model._get_request_payload(
+        [
+            HumanMessage("What is 6 * 7?"),
+            message,
+            HumanMessage("Are you sure?"),
+        ]
+    )
+
+    assert payload["messages"][1]["reasoning"] == "Six times seven is 42."
 
 
 def test_does_not_replay_reasoning_when_disabled() -> None:
-    preserving_model = _model(preserve_tool_call_reasoning=True)
+    preserving_model = _model(preserve_reasoning=True)
     message = preserving_model._create_chat_result(_tool_call_response()).generations[0].message
-    model = _model(preserve_tool_call_reasoning=False)
+    model = _model(preserve_reasoning=False)
 
     payload = model._get_request_payload(
         [
@@ -124,7 +132,7 @@ def test_does_not_replay_reasoning_when_disabled() -> None:
 
 
 def test_raises_when_completion_limit_is_exhausted() -> None:
-    model = _model(preserve_tool_call_reasoning=False)
+    model = _model(preserve_reasoning=False)
 
     with pytest.raises(RuntimeError, match="exhausted max_completion_tokens"):
         model._create_chat_result(_tool_call_response(finish_reason="length"))
@@ -134,30 +142,33 @@ def test_raises_when_completion_limit_is_exhausted() -> None:
     ("factory_name", "preserves_reasoning", "expected_extra_body"),
     [
         (
-            "qwen3_5_4b",
-            True,
-            {
-                "top_k": 20,
-                "include_reasoning": True,
-                "chat_template_kwargs": {"enable_thinking": True},
-            },
-        ),
-        (
-            "gemma_4_e4b",
+            "gemma_4_e2b_thinking",
             True,
             {
                 "top_k": 64,
+                "thinking_token_budget": 8192,
+                "repetition_detection": {
+                    "max_pattern_size": 20,
+                    "min_pattern_size": 3,
+                    "min_count": 4,
+                },
                 "include_reasoning": True,
                 "chat_template_kwargs": {"enable_thinking": True},
             },
         ),
         (
-            "lfm2_5_8b_a1b",
+            "lfm2_5_1_2b_thinking",
             False,
             {
-                "top_k": 80,
+                "top_k": 50,
                 "repetition_penalty": 1.05,
-                "include_reasoning": False,
+                "thinking_token_budget": 8192,
+                "repetition_detection": {
+                    "max_pattern_size": 20,
+                    "min_pattern_size": 3,
+                    "min_count": 4,
+                },
+                "include_reasoning": True,
             },
         ),
     ],
@@ -173,10 +184,8 @@ def test_graph_model_configuration(
     model = getattr(graph, factory_name)()
 
     assert isinstance(model, ChatVLLM)
-    assert model.max_tokens == 5120
+    assert model.max_tokens == 16384
     assert model.disable_streaming is True
     assert model.use_responses_api is False
-    assert model.preserve_tool_call_reasoning is preserves_reasoning
-    assert model.extra_body["thinking_token_budget"] == 4096
-    for key, value in expected_extra_body.items():
-        assert model.extra_body[key] == value
+    assert model.preserve_reasoning is preserves_reasoning
+    assert model.extra_body == expected_extra_body

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from decomposer.core import SubagentType, create_decomposer_agent
+from decomposer.prompts import decomposer_few_shot_messages
 from fastapi import Body, Request, Response
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -266,13 +267,15 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         body = body.model_copy(deep=True)
 
         input_messages = _input_to_messages(body.input)
-        initial_state = {"messages": input_messages}
+        few_shot_messages = decomposer_few_shot_messages()
+        initial_messages = [*few_shot_messages, *input_messages]
+        initial_state = {"messages": initial_messages}
         final_state = await self.graph.ainvoke(
             initial_state,
             context=NeMoGymContext(body=body),
         )
         all_messages = final_state["messages"]
-        output_messages = all_messages[len(input_messages) :]
+        output_messages = all_messages[len(initial_messages) :]
         output_items = _messages_to_items(output_messages)
         usage = _messages_to_usage(output_messages)
 
@@ -499,15 +502,15 @@ def _messages_to_usage(messages: list[BaseMessage]) -> NeMoGymResponseUsage | No
             continue
 
         if usage is None:
-            usage = response_usage
+            usage = response_usage.model_copy(deep=True)
         else:
             usage.input_tokens += response_usage.input_tokens
+            usage.input_tokens_details.cached_tokens += response_usage.input_tokens_details.cached_tokens
             usage.output_tokens += response_usage.output_tokens
+            usage.output_tokens_details.reasoning_tokens += (
+                response_usage.output_tokens_details.reasoning_tokens
+            )
             usage.total_tokens += response_usage.total_tokens
-
-            # Match Gym examples: keep aggregate nested details conservative.
-            usage.input_tokens_details.cached_tokens = 0
-            usage.output_tokens_details.reasoning_tokens = 0
 
     return usage
 

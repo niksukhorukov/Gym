@@ -3,9 +3,10 @@
     "."
   ],
   "graphs": {
-    "qwen3_5_4b": "./graph.py:qwen3_5_4b",
-    "gemma_4_e4b": "./graph.py:gemma_4_e4b",
-    "lfm2_5_8b_a1b": "./graph.py:lfm2_5_8b_a1b"
+    "qwen3_6_35b_a3b_fp8_thinking": "./graph.py:qwen3_6_35b_a3b_fp8_thinking",
+    "qwen3_6_35b_a3b_fp8_non_thinking": "./graph.py:qwen3_6_35b_a3b_fp8_non_thinking",
+    "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking",
+    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking"
   },
   "python_version": "3.12"
 }

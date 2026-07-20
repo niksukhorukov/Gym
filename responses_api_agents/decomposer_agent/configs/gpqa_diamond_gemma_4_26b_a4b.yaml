@@ -1,0 +1,69 @@
+responses_create_params:
+  temperature: 1.0
+  top_p: 0.95
+
+gpqa_diamond:
+  resources_servers:
+    gpqa_diamond:
+      entrypoint: app.py
+      domain: knowledge
+      verified: false
+      description: GPQA Diamond multiple-choice question answering problems.
+      value: Evaluate graduate-level scientific reasoning via MCQ verification.
+
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: http://127.0.0.1:8020/v1
+      api_key: EMPTY
+      model: google/gemma-4-26B-A4B-it
+      return_token_id_information: false
+      uses_reasoning_parser: true
+      uses_interleaved_reasoning: false
+      chat_template_kwargs:
+        enable_thinking: true
+      extra_body:
+        top_k: 64
+        repetition_detection:
+          max_pattern_size: 20
+          min_pattern_size: 3
+          min_count: 4
+        include_reasoning: true
+
+gpqa_diamond_decomposer_agent:
+  responses_api_agents:
+    decomposer_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: gpqa_diamond
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      subagent_types:
+        - subagent_type_id: qwen3_6_35b_a3b_fp8_thinking
+          assistant_id: qwen3_6_35b_a3b_fp8_thinking
+          url: http://127.0.0.1:2024
+          description: Qwen3.6-35B-A3B-FP8 with thinking enabled, without tools. Suitable for tasks that require reasoning. Much slower than `qwen3_6_35b_a3b_fp8_non_thinking`.
+        - subagent_type_id: qwen3_6_35b_a3b_fp8_non_thinking
+          assistant_id: qwen3_6_35b_a3b_fp8_non_thinking
+          url: http://127.0.0.1:2024
+          description: Qwen3.6-35B-A3B-FP8 with thinking disabled, without tools. Suitable for tasks that do not require reasoning, such as needle-in-a-haystack retrieval and knowledge-based QA. Much faster than `qwen3_6_35b_a3b_fp8_thinking`.
+        - subagent_type_id: gemma_4_26b_a4b_thinking
+          assistant_id: gemma_4_26b_a4b_thinking
+          url: http://127.0.0.1:2024
+          description: Gemma-4-26B-A4B-IT with thinking enabled, without tools. Suitable for tasks that require reasoning. Much slower than `gemma_4_26b_a4b_non_thinking`.
+        - subagent_type_id: gemma_4_26b_a4b_non_thinking
+          assistant_id: gemma_4_26b_a4b_non_thinking
+          url: http://127.0.0.1:2024
+          description: Gemma-4-26B-A4B-IT with thinking disabled, without tools. Suitable for tasks that do not require reasoning, such as needle-in-a-haystack retrieval and knowledge-based QA. Much faster than `gemma_4_26b_a4b_thinking`.
+      datasets:
+        - name: train
+          type: train
+          jsonl_fpath: resources_servers/gpqa_diamond/data/train.jsonl
+          gitlab_identifier:
+            dataset_name: gpqa_diamond_benchmark
+            version: 0.0.2
+            artifact_fpath: train.jsonl
+          license: MIT
