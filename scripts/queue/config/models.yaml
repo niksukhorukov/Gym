@@ -1,0 +1,225 @@
+defaults:
+  cuda_visible_devices: "0"
+  concurrency: 1
+  gpu_memory_utilization: "0.97"
+  max_model_len: 32768
+  max_output_tokens: 8192
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  vllm_wait_timeout: 1800
+  gym_wait_timeout: 300
+  extra_body: {}
+  vllm_extra_args: []
+  tool_vllm_extra_args: []
+  env: {}
+
+models:
+  qwen35_4b:
+    model: Qwen/Qwen3.5-4B
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 32768
+    extra_body:
+      top_k: 20
+      min_p: 0
+      presence_penalty: 1.5
+      repetition_penalty: 1
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - qwen3
+      - --gdn-prefill-backend
+      - triton
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+
+  qwen35_2b_thinking:
+    model: Qwen/Qwen3.5-2B
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 32768
+    extra_body:
+      top_k: 20
+      min_p: 0
+      presence_penalty: 1.5
+      repetition_penalty: 1
+      thinking_token_budget: 4096
+    env:
+      VLLM_USE_V2_MODEL_RUNNER: "0"
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - qwen3
+      - --gdn-prefill-backend
+      - triton
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+
+  qwen35_2b_non_thinking:
+    model: Qwen/Qwen3.5-2B
+    temperature: 1.0
+    top_p: 1.0
+    max_model_len: 131072
+    max_output_tokens: 32768
+    extra_body:
+      top_k: 20
+      min_p: 0
+      presence_penalty: 2.0
+      repetition_penalty: 1
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOmZhbHNlfQ==
+    vllm_extra_args:
+      - --gdn-prefill-backend
+      - triton
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+
+  # Backward-compatible alias of qwen35_2b_thinking.
+  qwen35_2b:
+    model: Qwen/Qwen3.5-2B
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 32768
+    extra_body:
+      top_k: 20
+      min_p: 0
+      presence_penalty: 1.5
+      repetition_penalty: 1
+      thinking_token_budget: 4096
+    env:
+      VLLM_USE_V2_MODEL_RUNNER: "0"
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - qwen3
+      - --gdn-prefill-backend
+      - triton
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+
+  gemma4_e4b_it:
+    model: google/gemma-4-E4B-it
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 64
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - gemma4
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - gemma4
+
+  gemma4_e2b_it_thinking:
+    model: google/gemma-4-E2B-it
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 64
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - gemma4
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - gemma4
+
+  gemma4_e2b_it_non_thinking:
+    model: google/gemma-4-E2B-it
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 64
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOmZhbHNlfQ==
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - gemma4
+
+  # Backward-compatible alias of gemma4_e2b_it_thinking.
+  gemma4_e2b_it:
+    model: google/gemma-4-E2B-it
+    temperature: 1.0
+    top_p: 0.95
+    max_model_len: 131072
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 64
+    env:
+      VLLM_DEFAULT_CHAT_TEMPLATE_KWARGS_B64: eyJlbmFibGVfdGhpbmtpbmciOnRydWV9
+    vllm_extra_args:
+      - --reasoning-parser
+      - gemma4
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - gemma4
+
+  lfm25_8b_a1b:
+    model: LiquidAI/LFM2.5-8B-A1B
+    temperature: 0.2
+    max_model_len: 128000
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 80
+      repetition_penalty: 1.05
+    vllm_extra_args:
+      - --reasoning-parser
+      - qwen3
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - lfm2
+
+  lfm25_1_2b_thinking:
+    model: LiquidAI/LFM2.5-1.2B-Thinking
+    temperature: 0.05
+    max_model_len: 32768
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 50
+      repetition_penalty: 1.05
+    vllm_extra_args:
+      - --reasoning-parser
+      - qwen3
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - lfm2
+
+  lfm25_1_2b_instruct:
+    model: LiquidAI/LFM2.5-1.2B-Instruct
+    temperature: 0.1
+    max_model_len: 32768
+    max_output_tokens: 8192
+    extra_body:
+      top_k: 50
+      repetition_penalty: 1.05
+    tool_vllm_extra_args:
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - lfm2
