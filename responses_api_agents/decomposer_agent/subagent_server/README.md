@@ -1,7 +1,7 @@
 # Decomposer subagent server
 
 This lightweight LangGraph server exposes the four assistants registered in
-`langgraph.json`. Each assistant is compiled in `graph.py` as a zero-tool
+`langgraph.json`. Each assistant is compiled in `subagents.py` as a zero-tool
 LangChain agent that receives one delegated task and returns a self-contained
 report.
 
@@ -25,7 +25,7 @@ Completions API. Their sampling parameters are:
 | Qwen non-thinking | 0.7 | 0.8 | 20 | `min_p=0.0`, `presence_penalty=1.5`, `repetition_penalty=1.0` |
 | Gemma thinking and non-thinking | 1.0 | 0.95 | 64 | — |
 
-`graph.py` also defines `gemma_4_e2b_thinking` and
+`subagents.py` also defines `gemma_4_e2b_thinking` and
 `gemma_4_e2b_non_thinking`, but they are not registered in `langgraph.json`
 and therefore are not exposed by this server.
 
