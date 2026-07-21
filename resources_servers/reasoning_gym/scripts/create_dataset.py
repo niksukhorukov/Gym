@@ -32,6 +32,7 @@ python create_dataset.py --task knights_knaves --size 500 --config '{"n_people":
 import argparse
 import json
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import reasoning_gym
@@ -170,13 +171,19 @@ TASK_CATEGORIES = {
 }
 
 
+def _json_default(value: object) -> str:
+    if isinstance(value, Fraction):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def format_entry_to_nemo_gym(entry: dict) -> dict:
     return {
         "responses_create_params": {
             "input": [{"role": "user", "content": entry["question"]}],
         },
         **entry,
-        "agent_ref": {"type": "responses_api_agents", "name": "reasoning_gym_simple_agent"},
+        # "agent_ref": {"type": "responses_api_agents", "name": "reasoning_gym_simple_agent"},
     }
 
 
@@ -305,7 +312,7 @@ def main():
 
     with open(output_path, "w") as f:
         for entry in entries:
-            f.write(json.dumps(entry) + "\n")
+            f.write(json.dumps(entry, default=_json_default) + "\n")
 
     print(f"\nDataset saved to {output_path}")
     print(f"Total entries: {len(entries)}")
