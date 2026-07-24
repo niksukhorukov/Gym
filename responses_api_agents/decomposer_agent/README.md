@@ -1,49 +1,37 @@
 # Decomposer agent
 
-## GPQA Diamond smoke run
+## Workplace Assistant
 
-This example uses Gemma-4 as the Decomposer and the four Qwen/Gemma assistants
-exposed by `subagent_server`.
-
-Before starting, make sure:
-
-- Qwen3.6-35B-A3B-FP8 is served at `http://127.0.0.1:8019/v1`.
-- Gemma-4-26B-A4B-IT is served at `http://127.0.0.1:8020/v1`.
-- `resources_servers/gpqa_diamond/data/train.jsonl` exists. See the
-  [GPQA Diamond README](../../resources_servers/gpqa_diamond/README.md) if it
-  needs to be generated.
-
-From the repository root, start the subagent server:
+The Workplace config uses GLM-5.2 through OpenRouter as the Decomposer,
+thinking and non-thinking variants of Gemma-4-E4B and Qwen3.5-4B, and the
+thinking LFM2.5-8B-A1B as subagents. Set `policy_api_key` in
+`external/Gym/env.yaml` to an OpenRouter API key. From the project root, serve
+the three subagent models, each in its own terminal:
 
 ```bash
-external/Gym/responses_api_agents/decomposer_agent/subagent_server/serve.sh
+scripts/vllm_serve_gemma_4_e4b.sh
+scripts/vllm_serve_qwen3_5_4b.sh
+scripts/vllm_serve_lfm2_5_8b_a1b.sh
 ```
 
-In a second terminal, start the Gym servers:
+Start `subagent_server/serve.sh`, then start Gym with:
 
 ```bash
 cd external/Gym
 source .venv/bin/activate
 
 gym env start \
-  --config responses_api_agents/decomposer_agent/configs/gpqa_diamond_gemma_4_26b_a4b.yaml
+  --config responses_api_agents/decomposer_agent/configs/workplace_assistant_glm_5_2.yaml
 ```
 
-In a third terminal, run one task:
+Run one task:
 
 ```bash
-cd external/Gym
-source .venv/bin/activate
-
 gym eval run --no-serve \
-  --agent gpqa_diamond_decomposer_agent \
-  --input resources_servers/gpqa_diamond/data/train.jsonl \
-  --output ../../artifacts/gpqa_diamond_gemma_smoke.jsonl \
+  --agent workplace_assistant_decomposer_agent \
+  --input resources_servers/workplace_assistant/data/train.jsonl \
+  --output ../../artifacts/workplace_assistant_glm_5_2_smoke.jsonl \
   --limit 1 \
   --num-repeats 1 \
   --concurrency 1
 ```
-
-Stop the Gym and subagent servers with `Ctrl+C` when the run finishes. Other
-GPQA Decomposer models can be selected by replacing the config passed to
-`gym env start` with another file from `configs/`.

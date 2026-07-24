@@ -1,7 +1,6 @@
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from decomposer.core import SubagentType, create_decomposer_agent
 from decomposer.prompts import decomposer_few_shot_messages
@@ -13,7 +12,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ConfigDict
+from pydantic import ConfigDict, ImportString
 
 from nemo_gym.base_resources_server import (
     AggregateMetrics,
@@ -24,6 +23,7 @@ from nemo_gym.base_resources_server import (
 )
 from nemo_gym.base_responses_api_agent import BaseResponsesAPIAgentConfig, SimpleResponsesAPIAgent
 from nemo_gym.config_types import ModelServerRef, ResourcesServerRef
+from nemo_gym.global_config import get_first_server_config_dict
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunctionCallOutput,
@@ -123,7 +123,7 @@ class ChatNeMoGym(BaseChatModel):
         """Call the configured Gym model server once.
 
         The request body starts from the original Gym `/v1/responses` body passed
-        through runtime `context` by `NeMoGymMiddleware`. We replace only
+        through runtime `context` by `NeMoGymDecomposerAgentMiddleware`. We replace only
         `input` for the current model step and then apply kwargs bound by
         `create_agent`, mainly `tools` and `tool_choice`.
         """
@@ -132,7 +132,10 @@ class ChatNeMoGym(BaseChatModel):
 
         body = kwargs.pop("nemo_gym_body", None)
         if body is None:
-            raise RuntimeError("`ChatNeMoGym` expected `NeMoGymMiddleware` to pass `nemo_gym_body`.")
+            raise RuntimeError(
+                "`ChatNeMoGym` expected `NeMoGymDecomposerAgentMiddleware` "
+                "to pass `nemo_gym_body`."
+            )
         body = NeMoGymResponseCreateParamsNonStreaming.model_validate(body).model_dump(exclude_unset=True)
         body["input"] = _messages_to_items(messages)
 
@@ -196,12 +199,13 @@ class ChatNeMoGym(BaseChatModel):
         return self.bind(**bound_kwargs)
 
 
-@dataclass(frozen=True)
-class NeMoGymContext:
-    body: NeMoGymResponseCreateParamsNonStreaming
+class NeMoGymContext(TypedDict):
+    body: dict[str, Any]
+    resource_server_url: str
+    resource_server_cookies: dict[str, str]
 
 
-class NeMoGymMiddleware(AgentMiddleware):
+class NeMoGymDecomposerAgentMiddleware(AgentMiddleware):
     def wrap_model_call(
         self,
         request: ModelRequest,
@@ -217,10 +221,55 @@ class NeMoGymMiddleware(AgentMiddleware):
         return await handler(_request_with_body(request))
 
 
+def _default_response_for_verifier_factory(
+    nemo_gym_response: NeMoGymResponse,
+    final_state: dict[str, Any],
+    responses_create_params: NeMoGymResponseCreateParamsNonStreaming,
+) -> NeMoGymResponse:
+    return nemo_gym_response
+
+
+def _subagent_tool_calls_and_final_message(
+    nemo_gym_response: NeMoGymResponse,
+    final_state: dict[str, Any],
+    responses_create_params: NeMoGymResponseCreateParamsNonStreaming,
+) -> NeMoGymResponse:
+    final_assistant_message = None
+    for item in reversed(nemo_gym_response.output):
+        if _item_get(item, "type") == "message" and _item_get(item, "role") == "assistant":
+            final_assistant_message = item
+            break
+    if final_assistant_message is None:
+        raise RuntimeError("Decomposer response did not contain a final assistant message.")
+
+    response_data = nemo_gym_response.model_dump(mode="json")
+    request_data = responses_create_params.model_dump(mode="json")
+    response_data["output"] = [
+        *(
+            tool_call.model_dump(mode="json", exclude_none=True)
+            for tool_call in _collect_subagent_tool_calls(final_state)
+        ),
+        final_assistant_message.model_dump(mode="json", exclude_none=True),
+    ]
+    for field_name in ("tools", "tool_choice", "parallel_tool_calls"):
+        response_data[field_name] = request_data[field_name]
+    return NeMoGymResponse.model_validate(response_data)
+
+
 class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
     subagent_types: Sequence[SubagentType]
+    response_for_verifier_factory: ImportString[
+        Callable[
+            [
+                NeMoGymResponse,
+                dict[str, Any],
+                NeMoGymResponseCreateParamsNonStreaming,
+            ],
+            NeMoGymResponse,
+        ]
+    ] = _default_response_for_verifier_factory
 
 
 class DecomposerAgentRunRequest(BaseRunRequest):
@@ -235,11 +284,17 @@ class DecomposerAgentVerifyResponse(BaseVerifyResponse):
     model_config = ConfigDict(extra="allow")
 
 
+class DecomposerAgentResponse(NeMoGymResponse):
+    """Internal response transport between `/v1/responses` and `/run`."""
+
+    final_state: dict[str, Any]
+
+
 class DecomposerAgent(SimpleResponsesAPIAgent):
     """Gym agent server for the first Decomposer version.
 
-    Assumes LangGraph SDK subagent assistants are already running. For now,
-    subagents do not receive Gym resource-server tool/session context.
+    Assumes LangGraph SDK subagent assistants are already running. Gym function
+    tools and the seeded resource-server session are passed to every subagent run.
     """
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -254,16 +309,23 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
                 model_server_name=self.config.model_server.name,
             ),
             subagent_types=self.config.subagent_types,
-            middleware=[NeMoGymMiddleware()],
+            middleware=[NeMoGymDecomposerAgentMiddleware()],
             context_schema=NeMoGymContext,
         )
+
+    def _resources_server_base_url(self) -> str:
+        config = get_first_server_config_dict(
+            self.server_client.global_config_dict,
+            self.config.resources_server.name,
+        )
+        return self.server_client._build_server_base_url(config)
 
     async def responses(
         self,
         request: Request,
         response: Response,
         body: NeMoGymResponseCreateParamsNonStreaming = Body(),
-    ) -> NeMoGymResponse:
+    ) -> DecomposerAgentResponse:
         body = body.model_copy(deep=True)
 
         input_messages = _input_to_messages(body.input)
@@ -272,7 +334,11 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         initial_state = {"messages": initial_messages}
         final_state = await self.graph.ainvoke(
             initial_state,
-            context=NeMoGymContext(body=body),
+            context={
+                "body": body.model_dump(mode="json", exclude_unset=True),
+                "resource_server_url": self._resources_server_base_url(),
+                "resource_server_cookies": dict(request.cookies),
+            },
         )
         all_messages = final_state["messages"]
         output_messages = all_messages[len(initial_messages) :]
@@ -294,7 +360,14 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
             for k, v in model_server_cookies.items():
                 response.set_cookie(k, v)
 
-        return NeMoGymResponse.model_validate(model_response | {"output": output_items, "usage": usage})
+        return DecomposerAgentResponse.model_validate(
+            model_response
+            | {
+                "output": output_items,
+                "usage": usage,
+                "final_state": final_state,
+            }
+        )
 
     async def run(
         self,
@@ -321,8 +394,17 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         await raise_for_status(response)
         cookies = response.cookies
 
+        decomposer_agent_response = DecomposerAgentResponse.model_validate(await get_response_json(response))
+        nemo_gym_response = NeMoGymResponse.model_validate(
+            decomposer_agent_response.model_dump(mode="json", exclude={"final_state"})
+        )
+        response_for_verifier = self.config.response_for_verifier_factory(
+            nemo_gym_response,
+            decomposer_agent_response.final_state,
+            body.responses_create_params,
+        )
         verify_request = DecomposerAgentVerifyRequest.model_validate(
-            body.model_dump() | {"response": await get_response_json(response)}
+            body.model_dump() | {"response": response_for_verifier}
         )
 
         verify_response = await self.server_client.post(
@@ -332,7 +414,9 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
             cookies=cookies,
         )
         await raise_for_status(verify_response)
-        return DecomposerAgentVerifyResponse.model_validate(await get_response_json(verify_response))
+        verify_response_data = await get_response_json(verify_response)
+        verify_response_data["response"] = nemo_gym_response.model_dump(mode="json")
+        return DecomposerAgentVerifyResponse.model_validate(verify_response_data)
 
     async def aggregate_metrics(self, body: AggregateMetricsRequest = Body()) -> AggregateMetrics:
         response = await self.server_client.post(
@@ -424,11 +508,39 @@ def _input_to_messages(input: str | NeMoGymResponseInput) -> list[BaseMessage]:
 def _request_with_body(request: ModelRequest) -> ModelRequest:
     body = _item_get(request.runtime.context, "body")
     if body is None:
-        raise RuntimeError("`NeMoGymMiddleware` expected runtime `context.body`.")
+        raise RuntimeError("`NeMoGymDecomposerAgentMiddleware` expected runtime `context.body`.")
 
     model_settings = dict(request.model_settings)
     model_settings["nemo_gym_body"] = NeMoGymResponseCreateParamsNonStreaming.model_validate(body)
     return request.override(model_settings=model_settings)
+
+
+def _collect_subagent_tool_calls(
+    final_state: dict[str, Any],
+) -> list[NeMoGymResponseFunctionToolCall]:
+    subagent_runs = final_state.get("subagent_runs") or {}
+    function_calls: list[NeMoGymResponseFunctionToolCall] = []
+    reported_subagent_runs = sorted(
+        (
+            subagent_run
+            for subagent_run in subagent_runs.values()
+            if subagent_run.get("report_sequence_number") is not None
+        ),
+        key=lambda subagent_run: subagent_run["report_sequence_number"],
+    )
+    for subagent_run in reported_subagent_runs:
+        subagent_run_id = subagent_run["subagent_run_id"]
+        for tool_call in subagent_run.get("tool_calls") or []:
+            function_calls.append(
+                NeMoGymResponseFunctionToolCall(
+                    name=tool_call["name"],
+                    arguments=json.dumps(tool_call["args"], ensure_ascii=False),
+                    call_id=f"{subagent_run_id}_{tool_call['id']}",
+                    status="completed",
+                )
+            )
+
+    return function_calls
 
 
 def _messages_to_items(messages: list[BaseMessage]) -> list[NeMoGymResponseInputItem | NeMoGymResponseOutputItem]:

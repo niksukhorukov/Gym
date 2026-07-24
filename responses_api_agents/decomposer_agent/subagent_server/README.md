@@ -1,29 +1,37 @@
 # Decomposer subagent server
 
-This lightweight LangGraph server exposes the four assistants registered in
-`langgraph.json`. Each assistant is compiled in `subagents.py` as a zero-tool
-LangChain agent that receives one delegated task and returns a self-contained
-report.
+This lightweight LangGraph server exposes the five assistants registered in
+`langgraph.json`. Each assistant is compiled in `subagents.py` as a LangChain
+agent that receives one delegated task and returns a self-contained report.
+
+Tools are supplied per run through LangGraph runtime context. The shared
+`NeMoGymSubagentMiddleware` converts Gym Responses API function schemas to Chat
+Completions schemas, exposes them to the model, and executes generated calls by
+posting their arguments to the seeded Gym resource server. Runs without Gym
+function tools retain the previous tool-free behavior.
 
 | Assistant ID | Model | Endpoint | Thinking |
 | --- | --- | --- | --- |
-| `qwen3_6_35b_a3b_fp8_thinking` | `Qwen/Qwen3.6-35B-A3B-FP8` | `http://127.0.0.1:8019/v1` | Enabled |
-| `qwen3_6_35b_a3b_fp8_non_thinking` | `Qwen/Qwen3.6-35B-A3B-FP8` | `http://127.0.0.1:8019/v1` | Disabled |
-| `gemma_4_26b_a4b_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8020/v1` | Enabled |
-| `gemma_4_26b_a4b_non_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8020/v1` | Disabled |
+| `gemma_4_e4b_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Enabled |
+| `gemma_4_e4b_non_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Disabled |
+| `qwen3_5_4b_thinking` | `Qwen/Qwen3.5-4B` | `http://127.0.0.1:8022/v1` | Enabled |
+| `qwen3_5_4b_non_thinking` | `Qwen/Qwen3.5-4B` | `http://127.0.0.1:8022/v1` | Disabled |
+| `lfm2_5_8b_a1b_thinking` | `LiquidAI/LFM2.5-8B-A1B` | `http://127.0.0.1:8023/v1` | Enabled |
 
-Thinking assistants request and preserve reasoning output. Non-thinking
-assistants explicitly disable it. No explicit thinking-token budget is set.
+Thinking assistants request and preserve reasoning output. Where supported,
+non-thinking assistants explicitly disable it. No explicit thinking-token
+budget is set.
 
-All four assistants use a 32,768-token completion limit, a 300-second request
-timeout, no retries, one completion, disabled streaming, and the Chat
-Completions API. Their sampling parameters are:
+All five assistants use a 32,768-token completion limit, a 300-second request
+timeout, no retries, disabled streaming, and the Chat Completions API. Their
+sampling parameters are:
 
 | Model mode | Temperature | `top_p` | `top_k` | Other parameters |
 | --- | ---: | ---: | ---: | --- |
-| Qwen thinking | 1.0 | 0.95 | 20 | `min_p=0.0`, `presence_penalty=1.5`, `repetition_penalty=1.0` |
-| Qwen non-thinking | 0.7 | 0.8 | 20 | `min_p=0.0`, `presence_penalty=1.5`, `repetition_penalty=1.0` |
+| Qwen thinking | 1.0 | 0.95 | 20 | `presence_penalty=1.5` |
+| Qwen non-thinking | 0.7 | 0.8 | 20 | `presence_penalty=1.5` |
 | Gemma thinking and non-thinking | 1.0 | 0.95 | 64 | — |
+| LFM2.5-8B-A1B thinking | 0.2 | — | 80 | `repetition_penalty=1.05` |
 
 `subagents.py` also defines `gemma_4_e2b_thinking` and
 `gemma_4_e2b_non_thinking`, but they are not registered in `langgraph.json`
