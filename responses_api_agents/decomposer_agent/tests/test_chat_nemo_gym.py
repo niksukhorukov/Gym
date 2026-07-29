@@ -53,6 +53,20 @@ def test_messages_to_input_round_trips_agent_server_input(input_items):
     assert _messages_to_items(_input_to_messages(input_items)) == input_items
 
 
+def test_input_to_messages_joins_system_and_user_prompts_when_enabled():
+    input_items = [
+        {"type": "message", "role": "system", "content": "system prompt"},
+        {"type": "message", "role": "user", "content": "user prompt"},
+    ]
+
+    assert _messages_to_items(_input_to_messages(input_items)) == input_items
+    messages = _input_to_messages(
+        input_items,
+        join_gym_system_and_user_prompts=True,
+    )
+    assert messages == [HumanMessage(content="system prompt\n\nuser prompt")]
+
+
 def test_request_with_body_adds_body_to_model_settings():
     body = _body()
     request = _FakeModelRequest(
@@ -284,7 +298,10 @@ def test_chat_nemo_gym_preserves_model_params_and_overrides_tools():
 def test_responses_omits_unset_body_fields_from_runtime_context():
     graph = _FakeGraph()
     agent = _ResponsesTestAgent.model_construct(
-        config=SimpleNamespace(resources_server=SimpleNamespace(name="resources")),
+        config=SimpleNamespace(
+            resources_server=SimpleNamespace(name="resources"),
+            join_gym_system_and_user_prompts=False,
+        ),
         graph=graph,
     )
     body = NeMoGymResponseCreateParamsNonStreaming.model_validate(
@@ -300,6 +317,7 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
     )
 
     assert graph.context["body"] == {"input": "runtime prompt"}
+    assert graph.state == {"messages": [HumanMessage(content="runtime prompt")]}
 
 
 class _FakeModelRequest:
@@ -346,8 +364,10 @@ class _FakeRunServerClient:
 
 class _FakeGraph:
     context = None
+    state = None
 
     async def ainvoke(self, state, *, context):
+        self.state = state
         self.context = context
         return {
             "messages": [

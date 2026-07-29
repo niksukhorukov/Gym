@@ -12,5 +12,6 @@ exec uv run \
   --config langgraph.json \
   --host "${HOST:-127.0.0.1}" \
   --port "${PORT:-2024}" \
+  --n-jobs-per-worker "${N_JOBS_PER_WORKER:-16}" \
   --no-browser \
   --no-reload

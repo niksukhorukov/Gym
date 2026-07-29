@@ -260,6 +260,7 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
     subagent_types: Sequence[SubagentType]
+    join_gym_system_and_user_prompts: bool = False
     response_for_verifier_factory: ImportString[
         Callable[
             [
@@ -328,7 +329,10 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
     ) -> DecomposerAgentResponse:
         body = body.model_copy(deep=True)
 
-        input_messages = _input_to_messages(body.input)
+        input_messages = _input_to_messages(
+            body.input,
+            join_gym_system_and_user_prompts=self.config.join_gym_system_and_user_prompts,
+        )
         few_shot_messages = decomposer_few_shot_messages()
         initial_messages = [*few_shot_messages, *input_messages]
         initial_state = {"messages": initial_messages}
@@ -428,7 +432,11 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         return AggregateMetrics.model_validate(await get_response_json(response))
 
 
-def _input_to_messages(input: str | NeMoGymResponseInput) -> list[BaseMessage]:
+def _input_to_messages(
+    input: str | NeMoGymResponseInput,
+    *,
+    join_gym_system_and_user_prompts: bool = False,
+) -> list[BaseMessage]:
     """Convert Gym Responses API `input` into LangChain `messages`."""
     if isinstance(input, str):
         return [HumanMessage(content=input)]
@@ -501,6 +509,14 @@ def _input_to_messages(input: str | NeMoGymResponseInput) -> list[BaseMessage]:
             raise NotImplementedError(f"Unsupported Gym input item `type`: {item_type!r}")
 
         messages.append(message)
+
+    if (
+        join_gym_system_and_user_prompts
+        and len(messages) == 2
+        and isinstance(messages[0], SystemMessage)
+        and isinstance(messages[1], HumanMessage)
+    ):
+        return [HumanMessage(content=f"{messages[0].text}\n\n{messages[1].text}")]
 
     return messages
 
