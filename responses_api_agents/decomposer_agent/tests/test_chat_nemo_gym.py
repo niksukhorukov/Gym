@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from decomposer.prompts import workplace_assistant_task_45
 from fastapi import Response
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -185,7 +186,7 @@ def test_decomposer_agent_response_serializes_final_state():
     assert final_state["subagent_runs"] == {}
 
 
-def test_response_for_verifier_factory_can_be_imported_from_config():
+def test_factories_can_be_imported_from_config():
     config_data = {
         "host": "127.0.0.1",
         "port": 8000,
@@ -199,6 +200,9 @@ def test_response_for_verifier_factory_can_be_imported_from_config():
     config = DecomposerAgentConfig.model_validate(
         config_data
         | {
+            "few_shot_message_factories": [
+                "decomposer.prompts:workplace_assistant_task_45"
+            ],
             "response_for_verifier_factory": (
                 "responses_api_agents.decomposer_agent.app:"
                 "_subagent_tool_calls_and_final_message"
@@ -206,14 +210,16 @@ def test_response_for_verifier_factory_can_be_imported_from_config():
         }
     )
 
+    assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
+    assert config.few_shot_message_factories == [workplace_assistant_task_45]
     assert (
         config.response_for_verifier_factory
         is _subagent_tool_calls_and_final_message
     )
 
 
-def test_run_verifies_subagent_calls_but_returns_canonical_decomposer_response():
+def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_state():
     factory_calls = []
 
     def response_for_verifier_factory(*args):
@@ -260,7 +266,9 @@ def test_run_verifies_subagent_calls_but_returns_canonical_decomposer_response()
     assert [item.type for item in result.response.output] == ["function_call", "message"]
     assert result.response.output[0].name == "spawn_subagent"
     assert [tool.name for tool in result.response.tools] == ["spawn_subagent"]
-    assert "final_state" not in result.model_dump(mode="json")["response"]
+    result_data = result.model_dump(mode="json")
+    assert "final_state" not in result_data["response"]
+    assert result_data["decomposer_final_state"] == _final_state()
 
 
 def test_chat_nemo_gym_requires_body():
@@ -300,6 +308,7 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
     agent = _ResponsesTestAgent.model_construct(
         config=SimpleNamespace(
             resources_server=SimpleNamespace(name="resources"),
+            few_shot_message_factories=(),
             join_gym_system_and_user_prompts=False,
         ),
         graph=graph,
@@ -318,6 +327,37 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
 
     assert graph.context["body"] == {"input": "runtime prompt"}
     assert graph.state == {"messages": [HumanMessage(content="runtime prompt")]}
+
+
+def test_responses_prepends_configured_few_shot_messages():
+    graph = _FakeGraph()
+    few_shot_messages = [{"role": "user", "content": "few-shot prompt"}]
+    agent = _ResponsesTestAgent.model_construct(
+        config=SimpleNamespace(
+            resources_server=SimpleNamespace(name="resources"),
+            few_shot_message_factories=(lambda: few_shot_messages,),
+            join_gym_system_and_user_prompts=False,
+        ),
+        graph=graph,
+    )
+    body = NeMoGymResponseCreateParamsNonStreaming.model_validate(
+        {"input": "runtime prompt"}
+    )
+
+    asyncio.run(
+        agent.responses(
+            SimpleNamespace(cookies={}),
+            Response(),
+            body,
+        )
+    )
+
+    assert graph.state == {
+        "messages": [
+            *few_shot_messages,
+            HumanMessage(content="runtime prompt"),
+        ]
+    }
 
 
 class _FakeModelRequest:
