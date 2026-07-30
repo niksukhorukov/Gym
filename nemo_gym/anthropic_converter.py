@@ -66,6 +66,7 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
     NeMoGymSummary,
+    reasoning_item_texts,
 )
 
 
@@ -714,12 +715,12 @@ class AnthropicConverter:
 
     def _reasoning_item_to_anthropic_blocks(self, item: Dict[str, Any]) -> List[Dict[str, Any]]:
         blocks = []
-        for summary in item.get("summary", []):
+        for text in reasoning_item_texts(item):
             # Anthropic's ThinkingBlock requires a signature; open-model backends don't
             # produce one, so default to "" (the synthesized SSE never emits it anyway).
             block = {
                 "type": "thinking",
-                "thinking": summary["text"],
+                "thinking": text,
                 "signature": item.get("encrypted_content") or "",
             }
             blocks.append(block)

@@ -132,17 +132,63 @@ class NeMoGymSummary(Summary):
     pass
 
 
+class NeMoGymReasoningContentPart(BaseModel):
+    """Provider-specific plaintext carried inside a Responses reasoning item."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Optional[str] = None
+    text: Optional[str] = None
+
+
 class NeMoGymResponseReasoningItem(BaseModel):
     id: str
     # Override the Iterable to avoid lazy iterators in Pydantic validation.
-    summary: List[NeMoGymSummary]
+    summary: List[NeMoGymSummary] = Field(default_factory=list)
     type: Literal["reasoning"] = "reasoning"
     encrypted_content: Optional[str] = None
+    # Some OpenAI-compatible providers (including OpenRouter's GLM endpoint)
+    # return full reasoning text here instead of populating ``summary``.
+    content: Optional[Union[str, List[NeMoGymReasoningContentPart]]] = None
+    format: Optional[Any] = None
 
     # As of Wed Sep 17, 2025, the OpenAI API with GPT-5 returns None for this status rather than a valid value here.
     # On subsequent calls to the OpenAI endpoints within a rollout, the status parameter is not accepted i.e. the OpenAI API returns a bad request when the status parameter is populated.
     # It's not clear whether or not this is intended. We comment out this status parameter here as a quick stop-gap to fix this issue in Gym re-queries.
     # status: Optional[Literal["in_progress", "completed", "incomplete"]] = None
+
+
+def reasoning_item_texts(item: Any) -> List[str]:
+    """Extract plaintext from either provider ``content`` or OpenAI ``summary``.
+
+    ``content`` takes precedence so a provider that mirrors the same text into
+    both fields does not duplicate it in captures or converted prompts.
+    """
+
+    def field(value: Any, name: str, default: Any = None) -> Any:
+        if isinstance(value, dict):
+            return value.get(name, default)
+        return getattr(value, name, default)
+
+    content = field(item, "content")
+    content_texts: List[str] = []
+    if isinstance(content, str):
+        if content:
+            content_texts.append(content)
+    elif isinstance(content, list):
+        for part in content:
+            text = field(part, "text")
+            if isinstance(text, str) and text:
+                content_texts.append(text)
+    if content_texts:
+        return content_texts
+
+    summary_texts: List[str] = []
+    for summary in field(item, "summary", []) or []:
+        text = field(summary, "text")
+        if isinstance(text, str) and text:
+            summary_texts.append(text)
+    return summary_texts
 
 
 class NeMoGymResponseOutputText(BaseModel):
