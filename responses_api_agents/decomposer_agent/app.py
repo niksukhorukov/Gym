@@ -3,7 +3,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict
 
 from decomposer.core import SubagentType, create_decomposer_agent
-from decomposer.prompts import decomposer_few_shot_messages
 from fastapi import Body, Request, Response
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -294,6 +293,9 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
     subagent_types: Sequence[SubagentType]
+    few_shot_message_factories: Sequence[
+        ImportString[Callable[[], Sequence[dict[str, Any]]]]
+    ] = ()
     join_gym_system_and_user_prompts: bool = False
     response_for_verifier_factory: ImportString[
         Callable[
@@ -367,7 +369,11 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
             body.input,
             join_gym_system_and_user_prompts=self.config.join_gym_system_and_user_prompts,
         )
-        few_shot_messages = decomposer_few_shot_messages()
+        few_shot_messages = [
+            message
+            for factory in self.config.few_shot_message_factories
+            for message in factory()
+        ]
         initial_messages = [*few_shot_messages, *input_messages]
         initial_state = {"messages": initial_messages}
         final_state = await self.graph.ainvoke(
@@ -473,6 +479,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         await raise_for_status(verify_response)
         verify_response_data = await get_response_json(verify_response)
         verify_response_data["response"] = nemo_gym_response.model_dump(mode="json")
+        verify_response_data["final_state"] = decomposer_agent_response.final_state
         return DecomposerAgentVerifyResponse.model_validate(verify_response_data)
 
     async def aggregate_metrics(self, body: AggregateMetricsRequest = Body()) -> AggregateMetrics:

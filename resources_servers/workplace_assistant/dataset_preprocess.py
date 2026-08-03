@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Run as `python resources_servers/workplace_assistant/dataset_preprocess.py --split test``
+# Run as `python resources_servers/workplace_assistant/dataset_preprocess.py --split validation`
 import argparse
 import json
 from copy import deepcopy
@@ -24,6 +24,9 @@ import pandas as pd
 from datasets import load_dataset
 
 from resources_servers.workplace_assistant.utils import get_tools
+
+
+DATASET_REPO_ID = "nvidia/Nemotron-RL-agent-workplace_assistant"
 
 
 @dataclass
@@ -84,7 +87,7 @@ Below is a reasoning template to guide your thinking process as you solve the pr
         )
 
     def get_samples(self, split):
-        dataset = load_dataset("Nexusflow/250319-workplace_assistant-fulleval", split=split)
+        dataset = load_dataset(DATASET_REPO_ID, split=split)
 
         processed_samples = []
 
@@ -94,16 +97,14 @@ Below is a reasoning template to guide your thinking process as you solve the pr
             create_params["input"].append(
                 {
                     "role": "user",
-                    "content": d["problem"],
+                    "content": d["responses_create_params"]["input"][-1]["content"],
                 }
             )
-
-            ground_truth = json.loads(d["solution"])  # json loads ground truths/solutions
 
             processed_samples.append(
                 self.WorkbenchSample(
                     create_params=create_params,
-                    reference=ground_truth,
+                    reference=d["ground_truth"],
                     category=d["category"],
                     environment_name=d["environment_name"],
                 )
@@ -123,8 +124,9 @@ def main():
     parser.add_argument(
         "--split",
         type=str,
+        choices=["train", "validation"],
         default="train",
-        help="Kind of data being created - train or test",
+        help="Dataset split to create.",
     )
     args = parser.parse_args()
 
