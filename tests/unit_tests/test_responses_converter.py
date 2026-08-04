@@ -25,6 +25,8 @@ from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunction,
     NeMoGymFunctionCallOutput,
+    NeMoGymReasoningContent,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -36,7 +38,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
 )
 from nemo_gym.responses_converter import (
     ResponsesConverter,
@@ -277,7 +278,7 @@ def test_responses_to_chat_completion_reasoning_prepended(converter: ResponsesCo
         id="rs_1",
         type="reasoning",
         status="completed",
-        summary=[NeMoGymSummary(type="summary_text", text="thinking...")],
+        summary=[NeMoGymReasoningSummary(type="summary_text", text="thinking...")],
     )
     params = converter.responses_to_chat_completion_create_params(
         NeMoGymResponseCreateParamsNonStreaming(
@@ -314,6 +315,7 @@ def test_responses_to_chat_completion_reasoning_content_precedes_summary(convert
     )
 
     assert params.messages[0]["content"] == ("<think>first thought</think><think>second thought</think>the answer")
+    assert isinstance(reasoning.content[0], NeMoGymReasoningContent)
     assert reasoning.content[1].model_extra == {"provider_field": True}
     assert "status" not in reasoning.model_dump()
 

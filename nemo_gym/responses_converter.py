@@ -44,6 +44,7 @@ from nemo_gym.openai_utils import (
     NeMoGymFunctionCallOutput,
     NeMoGymFunctionDefinition,
     NeMoGymFunctionToolParam,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -54,7 +55,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
     Reasoning,
     TokenIDLogProbMixin,
     reasoning_item_texts,
@@ -390,7 +390,8 @@ class ResponsesConverter(BaseModel):
                 id=f"rs_{uuid4().hex}",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(text=reasoning_text, type="summary_text") for reasoning_text in reasoning_matches
+                    NeMoGymReasoningSummary(text=reasoning_text, type="summary_text")
+                    for reasoning_text in reasoning_matches
                 ],
                 status="completed",
             )

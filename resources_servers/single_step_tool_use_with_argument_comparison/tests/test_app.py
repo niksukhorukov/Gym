@@ -20,6 +20,7 @@ from pytest import approx, fixture
 
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -27,7 +28,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from resources_servers.single_step_tool_use_with_argument_comparison.app import (
@@ -138,7 +138,7 @@ class TestApp:
         reasoning_item = NeMoGymResponseReasoningItem(
             id="reasoning_item",
             summary=[
-                NeMoGymSummary(
+                NeMoGymReasoningSummary(
                     type="summary_text",
                     text="this is reasoning",
                 )

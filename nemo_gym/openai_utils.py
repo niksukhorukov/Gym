@@ -78,6 +78,7 @@ from openai.types.responses.response_output_item import (
 )
 from openai.types.responses.response_output_text_param import Annotation, Logprob
 from openai.types.responses.response_reasoning_item import (
+    Content,
     Summary,
 )
 from openai.types.responses.response_usage import InputTokensDetails as ResponseInputTokensDetails
@@ -128,28 +129,23 @@ class TokenIDLogProbTypedDictMixin(TypedDict):
 ########################################
 
 
-class NeMoGymSummary(Summary):
+class NeMoGymReasoningSummary(Summary):
     pass
 
 
-class NeMoGymReasoningContentPart(BaseModel):
-    """Provider-specific plaintext carried inside a Responses reasoning item."""
-
-    model_config = ConfigDict(extra="allow")
-
-    type: Optional[str] = None
-    text: Optional[str] = None
+class NeMoGymReasoningContent(Content):
+    pass
 
 
 class NeMoGymResponseReasoningItem(BaseModel):
     id: str
     # Override the Iterable to avoid lazy iterators in Pydantic validation.
-    summary: List[NeMoGymSummary] = Field(default_factory=list)
+    summary: List[NeMoGymReasoningSummary] = Field(default_factory=list)
     type: Literal["reasoning"] = "reasoning"
     encrypted_content: Optional[str] = None
-    # Some OpenAI-compatible providers (including OpenRouter's GLM endpoint)
-    # return full reasoning text here instead of populating ``summary``.
-    content: Optional[Union[str, List[NeMoGymReasoningContentPart]]] = None
+    # Some providers, including OpenRouter's GLM endpoint, populate the
+    # Responses reasoning-text content while leaving ``summary`` empty.
+    content: Optional[Union[str, List[NeMoGymReasoningContent]]] = None
     format: Optional[Any] = None
 
     # As of Wed Sep 17, 2025, the OpenAI API with GPT-5 returns None for this status rather than a valid value here.

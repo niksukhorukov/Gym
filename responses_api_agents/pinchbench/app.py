@@ -56,6 +56,7 @@ from nemo_gym.base_responses_api_agent import (
 )
 from nemo_gym.openai_utils import (
     NeMoGymFunctionCallOutput,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -65,7 +66,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
 )
 from nemo_gym.sandbox import AsyncSandbox, SandboxResources, SandboxSpec
 
@@ -531,7 +531,7 @@ class PinchBenchAgent(SimpleResponsesAPIAgent):
                     output_items.append(
                         NeMoGymResponseReasoningItem(
                             id=f"rs_{event_id or len(output_items)}",
-                            summary=[NeMoGymSummary(text=reasoning, type="summary_text")],
+                            summary=[NeMoGymReasoningSummary(text=reasoning, type="summary_text")],
                             type="reasoning",
                             encrypted_content=None,
                         )

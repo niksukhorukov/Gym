@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from nemo_gym.openai_utils import (
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseFunctionToolCall,
     NeMoGymResponseOutputItem,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from resources_servers.terminal_multi_harness.common.response_utils import (
     extract_action,
@@ -47,7 +47,7 @@ class TestResponseUtils:
         reasoning_item = NeMoGymResponseReasoningItem(
             id="reasoning_item",
             summary=[
-                NeMoGymSummary(
+                NeMoGymReasoningSummary(
                     type="summary_text",
                     text="this is reasoning text",
                 )

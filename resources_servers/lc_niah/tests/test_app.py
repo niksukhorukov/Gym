@@ -19,12 +19,12 @@ import pytest
 from pytest import approx
 
 from nemo_gym.openai_utils import (
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from resources_servers.lc_niah.app import (
@@ -46,7 +46,7 @@ def _make_response(answer: Optional[str] = None, reasoning: Optional[str] = None
         output.append(
             NeMoGymResponseReasoningItem(
                 id="rs",
-                summary=[NeMoGymSummary(text=reasoning, type="summary_text")],
+                summary=[NeMoGymReasoningSummary(text=reasoning, type="summary_text")],
                 type="reasoning",
             )
         )

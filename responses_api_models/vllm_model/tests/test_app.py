@@ -42,6 +42,7 @@ from nemo_gym.openai_utils import (
     NeMoGymFunctionCallOutput,
     NeMoGymFunctionToolParam,
     NeMoGymMessage,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -50,7 +51,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from responses_api_models.vllm_model.app import (
@@ -455,7 +455,7 @@ PARAMETERIZE_DATA = [
             NeMoGymResponseReasoningItem(
                 id="rs_123",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         text="I have identified the city as San Francisco based on user input.",
                         type="summary_text",
                     )
@@ -500,7 +500,7 @@ PARAMETERIZE_DATA = [
                     id="rs_123",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             text="I have identified the city as San Francisco based on user input.",
                             type="summary_text",
                         )
@@ -517,11 +517,11 @@ PARAMETERIZE_DATA = [
             NeMoGymResponseReasoningItem(
                 id="rs_123",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         text="I'll first think about the user's question.",
                         type="summary_text",
                     ),
-                    NeMoGymSummary(text="Then I will answer.", type="summary_text"),
+                    NeMoGymReasoningSummary(text="Then I will answer.", type="summary_text"),
                 ],
                 type="reasoning",
                 status="completed",
@@ -563,11 +563,11 @@ PARAMETERIZE_DATA = [
                     id="rs_123",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             text="I'll first think about the user's question.",
                             type="summary_text",
                         ),
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             text="Then I will answer.",
                             type="summary_text",
                         ),
@@ -923,7 +923,7 @@ class TestApp:
                 id="rs_123",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         type="summary_text",
                         text="Considering ways to greet the user...",
                     )
@@ -1075,7 +1075,7 @@ class TestApp:
                 id="rs_123",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         type="summary_text",
                         text="Checking order details...",
                     )
@@ -1637,7 +1637,7 @@ class TestApp:
                 status="completed",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         type="summary_text",
                         text="First reasoning item",
                     )
@@ -1717,7 +1717,7 @@ class TestApp:
                     status="completed",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             type="summary_text",
                             text="Gathering order status and delivery info...",
                         )
@@ -1864,7 +1864,7 @@ class TestApp:
                     status="completed",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             type="summary_text",
                             text="None content test",
                         )
@@ -2095,7 +2095,7 @@ class TestApp:
                 status="completed",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         type="summary_text",
                         text="First reasoning item",
                     )
@@ -2175,7 +2175,7 @@ class TestApp:
                     status="completed",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             type="summary_text",
                             text="Gathering order status and delivery info...",
                         )
@@ -2322,7 +2322,7 @@ class TestApp:
                     status="completed",
                     type="reasoning",
                     summary=[
-                        NeMoGymSummary(
+                        NeMoGymReasoningSummary(
                             type="summary_text",
                             text="None content test",
                         )
@@ -2515,7 +2515,7 @@ class TestApp:
                 status="completed",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(
+                    NeMoGymReasoningSummary(
                         type="summary_text",
                         text="First reasoning item",
                     )
@@ -2754,8 +2754,8 @@ class TestVLLMConverter:
                 id=f"rs_{FIXED_UUID}",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(text="I need to check the user's order ID.", type="summary_text"),
-                    NeMoGymSummary(text="The order ID is 12345.", type="summary_text"),
+                    NeMoGymReasoningSummary(text="I need to check the user's order ID.", type="summary_text"),
+                    NeMoGymReasoningSummary(text="The order ID is 12345.", type="summary_text"),
                 ],
                 status="completed",
             ),
@@ -3044,7 +3044,7 @@ class TestVLLMConverter:
         expected_response_output_items = [
             NeMoGymResponseReasoningItem(
                 id="rs_123",
-                summary=[NeMoGymSummary(text=" \n \n I'm thinking \n \n ", type="summary_text")],
+                summary=[NeMoGymReasoningSummary(text=" \n \n I'm thinking \n \n ", type="summary_text")],
                 type="reasoning",
                 encrypted_content=None,
             ),

@@ -56,6 +56,7 @@ from nemo_gym.anthropic_utils import NeMoGymAnthropicMessage
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunctionCallOutput,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -65,7 +66,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
     reasoning_item_texts,
 )
 
@@ -253,7 +253,7 @@ class AnthropicConverter:
                     NeMoGymResponseReasoningItem(
                         id=f"rs_{uuid4().hex}",
                         summary=[
-                            NeMoGymSummary(
+                            NeMoGymReasoningSummary(
                                 text=block.get("thinking") or block.get("text", ""),
                                 type="summary_text",
                             )
@@ -392,7 +392,7 @@ class AnthropicConverter:
                 items.append(
                     NeMoGymResponseReasoningItem(
                         id=f"rs_{uuid4().hex}",
-                        summary=[NeMoGymSummary(text=block.get("thinking", ""), type="summary_text")],
+                        summary=[NeMoGymReasoningSummary(text=block.get("thinking", ""), type="summary_text")],
                         encrypted_content=block.get("signature"),
                         type="reasoning",
                     )
