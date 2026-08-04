@@ -613,6 +613,38 @@ def test_tool_calls_and_reasoning_chat_and_anthropic():
     assert _tool_calls_and_reasoning({"unrelated": 1}) == ([], None)
 
 
+def test_tool_calls_and_reasoning_responses_content_and_summary():
+    from nemo_gym.base_responses_api_model import _tool_calls_and_reasoning
+
+    response = {
+        "output": [
+            {
+                "type": "reasoning",
+                "content": [
+                    {"type": "reasoning_text", "text": "first"},
+                    {"type": "reasoning_text", "text": "second"},
+                ],
+                "summary": [{"type": "summary_text", "text": "duplicate"}],
+            },
+            {
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "f",
+                "arguments": '{"a": 1}',
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "legacy"}],
+            },
+        ]
+    }
+
+    assert _tool_calls_and_reasoning(response) == (
+        [{"call_id": "c1", "name": "f", "arguments": {"a": 1}}],
+        "first\nsecond\nlegacy",
+    )
+
+
 def test_tool_calls_and_reasoning_accepts_reasoning_alias():
     from nemo_gym.base_responses_api_model import _tool_calls_and_reasoning
 

@@ -22,12 +22,12 @@ from nemo_gym.openai_utils import (
     NeMoGymChatCompletion,
     NeMoGymChatCompletionMessage,
     NeMoGymChoice,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from resources_servers.imo_proofbench_judge.app import (
@@ -264,7 +264,7 @@ def _make_parsed_reasoning_response(
     output = [
         NeMoGymResponseReasoningItem(
             id="rsn",
-            summary=[NeMoGymSummary(text=reasoning_text, type="summary_text")],
+            summary=[NeMoGymReasoningSummary(text=reasoning_text, type="summary_text")],
             type="reasoning",
         )
     ]

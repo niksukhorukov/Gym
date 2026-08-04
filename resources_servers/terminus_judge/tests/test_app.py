@@ -20,12 +20,12 @@ from pytest import fixture
 
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from resources_servers.terminus_judge.app import (
@@ -336,7 +336,7 @@ class TestExtractLastAssistantText:
         output_items = [
             NeMoGymResponseReasoningItem(
                 id="reasoning_1",
-                summary=[NeMoGymSummary(type="summary_text", text="thinking...")],
+                summary=[NeMoGymReasoningSummary(type="summary_text", text="thinking...")],
             ),
             NeMoGymResponseOutputMessage(
                 id="msg_1",

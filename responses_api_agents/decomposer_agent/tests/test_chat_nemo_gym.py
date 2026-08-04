@@ -3,24 +3,31 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from decomposer.prompts import workplace_assistant_task_45
 from fastapi import Response
 from langchain_core.messages import AIMessage, HumanMessage
 
 from nemo_gym.openai_utils import NeMoGymResponse, NeMoGymResponseCreateParamsNonStreaming
 from responses_api_agents.decomposer_agent.app import (
+    MISSING_FINAL_ASSISTANT_FAILURE_CLASS,
+    NG_FAILURE_CLASS_KEY,
+    NG_FAILURE_DETAIL_KEY,
+    TERMINAL_SUBAGENT_STATUSES,
+    UNCOLLECTED_SUBAGENTS_FAILURE_CLASS,
     ChatNeMoGym,
     DecomposerAgent,
     DecomposerAgentConfig,
     DecomposerAgentResponse,
     DecomposerAgentRunRequest,
+    MissingFinalAssistantMessageError,
     NeMoGymContext,
+    UncollectedSubagentsError,
     _collect_subagent_tool_calls,
     _default_response_for_verifier_factory,
     _input_to_messages,
     _messages_to_items,
     _request_with_body,
     _subagent_tool_calls_and_final_message,
+    _validate_decomposer_rollout,
 )
 
 
@@ -93,7 +100,7 @@ def test_collect_subagent_tool_calls_preserves_all_calls_in_report_order():
                 "report_sequence_number": 1,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "a"}},
-                ]
+                ],
             },
             "run_b": {
                 "subagent_run_id": "run_b",
@@ -101,7 +108,7 @@ def test_collect_subagent_tool_calls_preserves_all_calls_in_report_order():
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "b1"}},
                     {"id": "call_2", "name": "not_allowed", "args": {"value": "b2"}},
-                ]
+                ],
             },
         },
     }
@@ -168,6 +175,122 @@ def test_subagent_tool_calls_and_final_message():
     assert verifier_response.parallel_tool_calls is False
 
 
+def test_subagent_tool_calls_and_final_message_requires_final_message():
+    response_data = _model_response()
+    response_data["output"] = [
+        {
+            "id": "reasoning_test",
+            "type": "reasoning",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "I am still reasoning."}],
+        }
+    ]
+
+    with pytest.raises(
+        MissingFinalAssistantMessageError,
+        match="did not contain a final assistant message",
+    ):
+        _subagent_tool_calls_and_final_message(
+            NeMoGymResponse.model_validate(response_data),
+            _final_state(),
+            _body(),
+        )
+
+
+def test_validate_decomposer_rollout_rejects_nonterminal_assistant_text():
+    response_data = _model_response()
+    final_state = _final_state()
+    final_state["messages"] = [
+        {
+            "type": "ai",
+            "content": "",
+            "tool_calls": [],
+        }
+    ]
+
+    with pytest.raises(MissingFinalAssistantMessageError):
+        _validate_decomposer_rollout(
+            NeMoGymResponse.model_validate(response_data),
+            final_state,
+        )
+
+
+def test_validate_decomposer_rollout_requires_graph_messages():
+    final_state = _final_state()
+    final_state["messages"] = []
+
+    with pytest.raises(MissingFinalAssistantMessageError):
+        _validate_decomposer_rollout(
+            NeMoGymResponse.model_validate(_model_response()),
+            final_state,
+        )
+
+
+@pytest.mark.parametrize("status", sorted(TERMINAL_SUBAGENT_STATUSES))
+def test_validate_decomposer_rollout_accepts_collected_terminal_reports(status):
+    final_state = _final_state()
+    final_state["subagent_runs"]["run_a"] |= {
+        "status": status,
+        "report": {
+            "subagent_run_id": "run_a",
+            "status": status,
+            "content": "result",
+        },
+    }
+    final_state["subagent_runs"]["run_b"] = {
+        "subagent_run_id": "run_b",
+        "status": "success",
+        "report": {
+            "subagent_run_id": "run_b",
+            "status": "success",
+            "content": "another result",
+        },
+        "report_sequence_number": 1,
+        "tool_calls": [],
+    }
+
+    _validate_decomposer_rollout(
+        NeMoGymResponse.model_validate(_model_response()),
+        final_state,
+    )
+
+
+def test_validate_decomposer_rollout_rejects_any_uncollected_run():
+    final_state = _final_state()
+    final_state["subagent_runs"]["run_b"] = {
+        "subagent_run_id": "run_b",
+        "status": "in_progress",
+        "report": None,
+    }
+
+    with pytest.raises(
+        UncollectedSubagentsError,
+        match=r"`run_b` .*non-terminal status 'in_progress'.*missing report",
+    ):
+        _validate_decomposer_rollout(
+            NeMoGymResponse.model_validate(_model_response()),
+            final_state,
+        )
+
+
+def test_validate_decomposer_rollout_rejects_inconsistent_report():
+    final_state = _final_state()
+    final_state["subagent_runs"]["run_a"]["report"] = {
+        "subagent_run_id": "another_run",
+        "status": "error",
+        "content": "wrong report",
+    }
+
+    with pytest.raises(
+        UncollectedSubagentsError,
+        match="report run ID does not match.*report status does not match",
+    ):
+        _validate_decomposer_rollout(
+            NeMoGymResponse.model_validate(_model_response()),
+            final_state,
+        )
+
+
 def test_decomposer_agent_response_serializes_final_state():
     response = DecomposerAgentResponse.model_validate(
         _model_response()
@@ -200,23 +323,17 @@ def test_factories_can_be_imported_from_config():
     config = DecomposerAgentConfig.model_validate(
         config_data
         | {
-            "few_shot_message_factories": [
-                "decomposer.prompts:workplace_assistant_task_45"
-            ],
+            "few_shot_message_factories": ["builtins:list"],
             "response_for_verifier_factory": (
-                "responses_api_agents.decomposer_agent.app:"
-                "_subagent_tool_calls_and_final_message"
+                "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
             ),
         }
     )
 
     assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
-    assert config.few_shot_message_factories == [workplace_assistant_task_45]
-    assert (
-        config.response_for_verifier_factory
-        is _subagent_tool_calls_and_final_message
-    )
+    assert config.few_shot_message_factories == [list]
+    assert config.response_for_verifier_factory is _subagent_tool_calls_and_final_message
 
 
 def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_state():
@@ -268,7 +385,115 @@ def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_s
     assert [tool.name for tool in result.response.tools] == ["spawn_subagent"]
     result_data = result.model_dump(mode="json")
     assert "final_state" not in result_data["response"]
-    assert result_data["decomposer_final_state"] == _final_state()
+    assert result_data["final_state"] == _final_state()
+
+
+def test_run_routes_missing_final_message_to_retryable_failure():
+    response_data = _model_response()
+    response_data["output"] = [
+        {
+            "id": "reasoning_test",
+            "type": "reasoning",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "I am still reasoning."}],
+        }
+    ]
+    response_data["final_state"] = _final_state()
+    server_client = _FakeRunServerClient(response_data)
+    agent = DecomposerAgent.model_construct(
+        config=SimpleNamespace(
+            name="decomposer",
+            resources_server=SimpleNamespace(name="resources"),
+            response_for_verifier_factory=_subagent_tool_calls_and_final_message,
+        ),
+        server_client=server_client,
+    )
+
+    result = asyncio.run(
+        agent.run(
+            SimpleNamespace(cookies={"initial": "cookie"}),
+            DecomposerAgentRunRequest(responses_create_params=_body()),
+        )
+    )
+    result_data = result.model_dump(mode="json")
+
+    assert server_client.verify_request is None
+    assert result.reward == 0.0
+    assert result_data[NG_FAILURE_CLASS_KEY] == MISSING_FINAL_ASSISTANT_FAILURE_CLASS
+    assert "did not contain a final assistant message" in result_data[NG_FAILURE_DETAIL_KEY]
+    assert result_data["response"]["output"][0]["type"] == "reasoning"
+    assert result_data["response"]["output"][0]["content"][0]["text"] == "I am still reasoning."
+    assert "_ng_failure_terminal" not in result_data
+    assert "final_state" not in result_data["response"]
+
+
+def test_run_routes_uncollected_subagents_to_retryable_failure():
+    factory_called = False
+
+    def response_for_verifier_factory(*_args):
+        nonlocal factory_called
+        factory_called = True
+        return NeMoGymResponse.model_validate(_model_response())
+
+    response_data = _model_response()
+    response_data["final_state"] = _final_state()
+    response_data["final_state"]["subagent_runs"]["run_b"] = {
+        "subagent_run_id": "run_b",
+        "status": "in_progress",
+        "report": None,
+    }
+    server_client = _FakeRunServerClient(response_data)
+    agent = DecomposerAgent.model_construct(
+        config=SimpleNamespace(
+            name="decomposer",
+            resources_server=SimpleNamespace(name="resources"),
+            response_for_verifier_factory=response_for_verifier_factory,
+        ),
+        server_client=server_client,
+    )
+
+    result = asyncio.run(
+        agent.run(
+            SimpleNamespace(cookies={"initial": "cookie"}),
+            DecomposerAgentRunRequest(responses_create_params=_body()),
+        )
+    )
+    result_data = result.model_dump(mode="json")
+
+    assert factory_called is False
+    assert server_client.verify_request is None
+    assert result.reward == 0.0
+    assert result_data[NG_FAILURE_CLASS_KEY] == UNCOLLECTED_SUBAGENTS_FAILURE_CLASS
+    assert "`run_b`" in result_data[NG_FAILURE_DETAIL_KEY]
+    assert "non-terminal status 'in_progress'" in result_data[NG_FAILURE_DETAIL_KEY]
+    assert "_ng_failure_terminal" not in result_data
+
+
+def test_run_does_not_swallow_factory_runtime_error():
+    def failing_factory(*_args):
+        raise RuntimeError("factory failed")
+
+    response_data = _model_response()
+    response_data["final_state"] = _final_state()
+    server_client = _FakeRunServerClient(response_data)
+    agent = DecomposerAgent.model_construct(
+        config=SimpleNamespace(
+            name="decomposer",
+            resources_server=SimpleNamespace(name="resources"),
+            response_for_verifier_factory=failing_factory,
+        ),
+        server_client=server_client,
+    )
+
+    with pytest.raises(RuntimeError, match="factory failed"):
+        asyncio.run(
+            agent.run(
+                SimpleNamespace(cookies={"initial": "cookie"}),
+                DecomposerAgentRunRequest(responses_create_params=_body()),
+            )
+        )
+
+    assert server_client.verify_request is None
 
 
 def test_chat_nemo_gym_requires_body():
@@ -313,9 +538,7 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
         ),
         graph=graph,
     )
-    body = NeMoGymResponseCreateParamsNonStreaming.model_validate(
-        {"input": "runtime prompt"}
-    )
+    body = NeMoGymResponseCreateParamsNonStreaming.model_validate({"input": "runtime prompt"})
 
     asyncio.run(
         agent.responses(
@@ -340,9 +563,7 @@ def test_responses_prepends_configured_few_shot_messages():
         ),
         graph=graph,
     )
-    body = NeMoGymResponseCreateParamsNonStreaming.model_validate(
-        {"input": "runtime prompt"}
-    )
+    body = NeMoGymResponseCreateParamsNonStreaming.model_validate({"input": "runtime prompt"})
 
     asyncio.run(
         agent.responses(
@@ -441,10 +662,22 @@ class _FakeJSONResponse:
 
 def _final_state():
     return {
-        "messages": [],
+        "messages": [
+            {
+                "type": "ai",
+                "content": "done",
+                "tool_calls": [],
+            }
+        ],
         "subagent_runs": {
             "run_a": {
                 "subagent_run_id": "run_a",
+                "status": "success",
+                "report": {
+                    "subagent_run_id": "run_a",
+                    "status": "success",
+                    "content": "subagent result",
+                },
                 "report_sequence_number": 0,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "a"}},

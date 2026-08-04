@@ -25,6 +25,8 @@ from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunction,
     NeMoGymFunctionCallOutput,
+    NeMoGymReasoningContent,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -36,7 +38,6 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
 )
 from nemo_gym.responses_converter import (
     ResponsesConverter,
@@ -277,7 +278,7 @@ def test_responses_to_chat_completion_reasoning_prepended(converter: ResponsesCo
         id="rs_1",
         type="reasoning",
         status="completed",
-        summary=[NeMoGymSummary(type="summary_text", text="thinking...")],
+        summary=[NeMoGymReasoningSummary(type="summary_text", text="thinking...")],
     )
     params = converter.responses_to_chat_completion_create_params(
         NeMoGymResponseCreateParamsNonStreaming(
@@ -288,6 +289,35 @@ def test_responses_to_chat_completion_reasoning_prepended(converter: ResponsesCo
         )
     )
     assert params.messages[0]["content"] == "<think>thinking...</think>the answer"
+
+
+def test_responses_to_chat_completion_reasoning_content_precedes_summary(converter: ResponsesConverter):
+    reasoning = NeMoGymResponseReasoningItem.model_validate(
+        {
+            "id": "rs_1",
+            "type": "reasoning",
+            "content": [
+                {"type": "reasoning_text", "text": "first thought"},
+                {"type": "reasoning_text", "text": "second thought", "provider_field": True},
+            ],
+            "format": "unknown",
+            "summary": [{"type": "summary_text", "text": "duplicate summary"}],
+            "status": "completed",
+        }
+    )
+    params = converter.responses_to_chat_completion_create_params(
+        NeMoGymResponseCreateParamsNonStreaming(
+            input=[
+                reasoning.model_dump(),
+                {"role": "assistant", "type": "message", "content": "the answer"},
+            ]
+        )
+    )
+
+    assert params.messages[0]["content"] == ("<think>first thought</think><think>second thought</think>the answer")
+    assert isinstance(reasoning.content[0], NeMoGymReasoningContent)
+    assert reasoning.content[1].model_extra == {"provider_field": True}
+    assert "status" not in reasoning.model_dump()
 
 
 def test_responses_to_chat_completion_reasoning_without_summary_is_noop(converter: ResponsesConverter):

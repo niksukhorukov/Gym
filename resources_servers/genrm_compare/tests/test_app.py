@@ -25,12 +25,12 @@ from nemo_gym.config_types import ModelServerRef
 from nemo_gym.global_config import ROLLOUT_INDEX_KEY_NAME, TASK_INDEX_KEY_NAME
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseOutputMessage,
     NeMoGymResponseOutputText,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from resources_servers.genrm_compare.app import (
     GenRMCompareConfig,
@@ -227,7 +227,7 @@ class TestGenRMCompareResourcesServer:
                         id="rs_123",
                         type="reasoning",
                         summary=[
-                            NeMoGymSummary(
+                            NeMoGymReasoningSummary(
                                 text="I have identified the city as San Francisco based on user input.",
                                 type="summary_text",
                             )

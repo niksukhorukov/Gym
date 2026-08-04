@@ -411,7 +411,7 @@ class TestServer:
         ``output_item.type != "message"`` skip and the
         ``content_item.type != "output_text"`` skip).
         """
-        from nemo_gym.openai_utils import NeMoGymResponseReasoningItem, NeMoGymSummary
+        from nemo_gym.openai_utils import NeMoGymReasoningSummary, NeMoGymResponseReasoningItem
 
         server_mock = MagicMock(spec=ServerClient)
         server = UGPhysicsJudgeResourcesServer(config=config, server_client=server_mock)
@@ -422,7 +422,7 @@ class TestServer:
         # The message content also includes a tool-call-style item which
         # is not output_text so the inner-loop continue is exercised.
         reasoning_item = NeMoGymResponseReasoningItem(
-            id="r-1", summary=[NeMoGymSummary(text="cot", type="summary_text")]
+            id="r-1", summary=[NeMoGymReasoningSummary(text="cot", type="summary_text")]
         )
         message_item = NeMoGymResponseOutputMessage(
             id="m-1",
@@ -539,7 +539,7 @@ class TestServer:
 
         Covers line 305 (``if last_output.type != "message": return …``).
         """
-        from nemo_gym.openai_utils import NeMoGymResponseReasoningItem, NeMoGymSummary
+        from nemo_gym.openai_utils import NeMoGymReasoningSummary, NeMoGymResponseReasoningItem
 
         server_mock = MagicMock(spec=ServerClient)
         server = UGPhysicsJudgeResourcesServer(config=config, server_client=server_mock)
@@ -549,7 +549,9 @@ class TestServer:
             model="m",
             object="response",
             output=[
-                NeMoGymResponseReasoningItem(id="r-1", summary=[NeMoGymSummary(text="thinking", type="summary_text")])
+                NeMoGymResponseReasoningItem(
+                    id="r-1", summary=[NeMoGymReasoningSummary(text="thinking", type="summary_text")]
+                )
             ],
             parallel_tool_calls=False,
             tool_choice="none",

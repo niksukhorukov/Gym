@@ -21,9 +21,9 @@ from pytest import MonkeyPatch
 from nemo_gym.config_types import ModelServerRef, ResourcesServerRef
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
+    NeMoGymReasoningSummary,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseReasoningItem,
-    NeMoGymSummary,
 )
 from nemo_gym.server_utils import ServerClient
 from responses_api_agents.cvdp_agent.app import (
@@ -259,7 +259,7 @@ class TestApp:
                         NeMoGymEasyInputMessage(content="hello", role="user", type="message"),
                         NeMoGymResponseReasoningItem(
                             id="msg_688babb17a7881998cc7a42d53c8e5790abdf302bcd600d3",
-                            summary=[NeMoGymSummary(text="I'm thinking how to respond", type="summary_text")],
+                            summary=[NeMoGymReasoningSummary(text="I'm thinking how to respond", type="summary_text")],
                             type="reasoning",
                             encrypted_content=None,
                             status="completed",

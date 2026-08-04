@@ -58,6 +58,7 @@ from nemo_gym.openai_utils import (
     NeMoGymChatCompletionCreateParamsNonStreaming,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
+    reasoning_item_texts,
 )
 from nemo_gym.responses_streaming import (
     sanitize_streaming_responses_body,
@@ -399,10 +400,7 @@ def _tool_calls_and_reasoning(response: dict[str, Any]) -> tuple[list[dict[str, 
                     }
                 )
             elif item.get("type") == "reasoning":
-                for summary in item.get("summary") or []:
-                    text = summary.get("text") if isinstance(summary, dict) else None
-                    if text:
-                        reasoning.append(text)
+                reasoning.extend(reasoning_item_texts(item))
         return tool_calls, ("\n".join(reasoning) or None)
 
     choices = response.get("choices")

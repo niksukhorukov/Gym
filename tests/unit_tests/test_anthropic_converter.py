@@ -203,6 +203,19 @@ class TestAnthropicRequestToResponses:
         assert item.summary[0].text == "hmm"
         assert item.encrypted_content == "sig-1"
 
+    def test_reasoning_content_becomes_thinking_block(self) -> None:
+        blocks = _converter()._reasoning_item_to_anthropic_blocks(
+            {
+                "id": "reasoning_1",
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "GLM thought"}],
+                "format": "unknown",
+                "summary": [],
+            }
+        )
+
+        assert blocks == [{"type": "thinking", "thinking": "GLM thought", "signature": ""}]
+
     def test_tools_and_tool_choice_variants(self) -> None:
         conv = _converter()
         params = conv.anthropic_request_to_responses(
