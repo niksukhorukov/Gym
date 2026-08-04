@@ -44,6 +44,7 @@ from nemo_gym.openai_utils import (
     NeMoGymFunctionCallOutput,
     NeMoGymFunctionDefinition,
     NeMoGymFunctionToolParam,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -54,9 +55,9 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
     Reasoning,
     TokenIDLogProbMixin,
+    reasoning_item_texts,
 )
 
 
@@ -316,8 +317,8 @@ class ResponsesConverter(BaseModel):
         cohesive block, later prepending it to a subsequent assistant message.
         See: https://github.com/NVIDIA-NeMo/Gym/blob/main/docs/how-to-faq.md#faq-openai-responses-vs-chat-completions-api for an example of reasoning in responses api.
         """
-        if "summary" in m and m["summary"]:
-            texts = [s["text"] for s in m["summary"]]
+        texts = reasoning_item_texts(m)
+        if texts:
             state.content_buffer += self._wrap_reasoning_in_think_tags(texts)
 
     def _format_function_call(
@@ -389,7 +390,8 @@ class ResponsesConverter(BaseModel):
                 id=f"rs_{uuid4().hex}",
                 type="reasoning",
                 summary=[
-                    NeMoGymSummary(text=reasoning_text, type="summary_text") for reasoning_text in reasoning_matches
+                    NeMoGymReasoningSummary(text=reasoning_text, type="summary_text")
+                    for reasoning_text in reasoning_matches
                 ],
                 status="completed",
             )

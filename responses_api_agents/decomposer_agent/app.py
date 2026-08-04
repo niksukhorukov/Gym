@@ -37,6 +37,43 @@ from nemo_gym.openai_utils import (
 from nemo_gym.server_utils import get_response_json, raise_for_status
 
 
+MISSING_FINAL_ASSISTANT_FAILURE_CLASS = "decomposer_missing_final_assistant_message"
+MISSING_FINAL_ASSISTANT_MESSAGE = "Decomposer response did not contain a final assistant message."
+UNCOLLECTED_SUBAGENTS_FAILURE_CLASS = "decomposer_uncollected_subagents"
+UNCOLLECTED_SUBAGENTS_MESSAGE = "Decomposer finalized before collecting all subagent reports"
+NG_FAILURE_CLASS_KEY = "_ng_failure_class"
+NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
+TERMINAL_SUBAGENT_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
+
+
+class DecomposerRolloutValidationError(RuntimeError):
+    """A retryable post-hoc validation failure for one Decomposer rollout."""
+
+    def __init__(self, failure_class: str, detail: str):
+        super().__init__(detail)
+        self.failure_class = failure_class
+
+
+class MissingFinalAssistantMessageError(DecomposerRolloutValidationError):
+    """The Decomposer stopped without producing an answer for the verifier."""
+
+    def __init__(self):
+        super().__init__(
+            MISSING_FINAL_ASSISTANT_FAILURE_CLASS,
+            MISSING_FINAL_ASSISTANT_MESSAGE,
+        )
+
+
+class UncollectedSubagentsError(DecomposerRolloutValidationError):
+    """The Decomposer answered before every spawned subagent report was collected."""
+
+    def __init__(self, details: str):
+        super().__init__(
+            UNCOLLECTED_SUBAGENTS_FAILURE_CLASS,
+            f"{UNCOLLECTED_SUBAGENTS_MESSAGE}: {details}.",
+        )
+
+
 class ChatNeMoGym(BaseChatModel):
     """Gym model-server wrapper that can be used as `decomposer_model` in
     `create_decomposer_agent`.
@@ -131,10 +168,7 @@ class ChatNeMoGym(BaseChatModel):
 
         body = kwargs.pop("nemo_gym_body", None)
         if body is None:
-            raise RuntimeError(
-                "`ChatNeMoGym` expected `NeMoGymDecomposerAgentMiddleware` "
-                "to pass `nemo_gym_body`."
-            )
+            raise RuntimeError("`ChatNeMoGym` expected `NeMoGymDecomposerAgentMiddleware` to pass `nemo_gym_body`.")
         body = NeMoGymResponseCreateParamsNonStreaming.model_validate(body).model_dump(exclude_unset=True)
         body["input"] = _messages_to_items(messages)
 
@@ -239,7 +273,7 @@ def _subagent_tool_calls_and_final_message(
             final_assistant_message = item
             break
     if final_assistant_message is None:
-        raise RuntimeError("Decomposer response did not contain a final assistant message.")
+        raise MissingFinalAssistantMessageError()
 
     response_data = nemo_gym_response.model_dump(mode="json")
     request_data = responses_create_params.model_dump(mode="json")
@@ -408,6 +442,25 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         nemo_gym_response = NeMoGymResponse.model_validate(
             decomposer_agent_response.model_dump(mode="json", exclude={"final_state"})
         )
+        try:
+            _validate_decomposer_rollout(
+                nemo_gym_response,
+                decomposer_agent_response.final_state,
+            )
+        except DecomposerRolloutValidationError as e:
+            # An incomplete terminal state is a failed rollout, not an agent-server
+            # failure. Keep the canonical response for diagnosis and route the
+            # sample to the retryable sidecar without calling the task verifier.
+            return DecomposerAgentVerifyResponse.model_validate(
+                body.model_dump(mode="json")
+                | {
+                    "response": nemo_gym_response.model_dump(mode="json"),
+                    "reward": 0.0,
+                    NG_FAILURE_CLASS_KEY: e.failure_class,
+                    NG_FAILURE_DETAIL_KEY: str(e),
+                }
+            )
+
         response_for_verifier = self.config.response_for_verifier_factory(
             nemo_gym_response,
             decomposer_agent_response.final_state,
@@ -566,6 +619,59 @@ def _collect_subagent_tool_calls(
     return function_calls
 
 
+def _validate_decomposer_rollout(
+    nemo_gym_response: NeMoGymResponse,
+    final_state: dict[str, Any],
+) -> None:
+    """Reject terminal graph states that are unsafe to send to the verifier."""
+    final_messages = final_state.get("messages") or []
+    if not final_messages:
+        raise MissingFinalAssistantMessageError()
+
+    terminal_message = final_messages[-1]
+    terminal_type = _item_get(terminal_message, "type")
+    terminal_content = _message_content_to_text(_item_get(terminal_message, "content", ""))
+    terminal_tool_calls = _item_get(terminal_message, "tool_calls", []) or []
+    if terminal_type != "ai" or terminal_tool_calls or not terminal_content.strip():
+        raise MissingFinalAssistantMessageError()
+
+    if not any(
+        _item_get(item, "type") == "message" and _item_get(item, "role") == "assistant"
+        for item in nemo_gym_response.output
+    ):
+        raise MissingFinalAssistantMessageError()
+
+    invalid_runs: list[str] = []
+    for subagent_run_id, subagent_run in (final_state.get("subagent_runs") or {}).items():
+        status = _item_get(subagent_run, "status")
+        report = _item_get(subagent_run, "report")
+        report_sequence_number = _item_get(
+            subagent_run,
+            "report_sequence_number",
+        )
+        reasons = []
+        if status not in TERMINAL_SUBAGENT_STATUSES:
+            reasons.append(f"non-terminal status {status!r}")
+        if report is None:
+            reasons.append("missing report")
+        else:
+            if _item_get(report, "subagent_run_id") != subagent_run_id:
+                reasons.append("report run ID does not match")
+            if _item_get(report, "status") != status:
+                reasons.append("report status does not match")
+        if (
+            isinstance(report_sequence_number, bool)
+            or not isinstance(report_sequence_number, int)
+            or report_sequence_number < 0
+        ):
+            reasons.append("missing or invalid report sequence number")
+        if reasons:
+            invalid_runs.append(f"`{subagent_run_id}` ({'; '.join(reasons)})")
+
+    if invalid_runs:
+        raise UncollectedSubagentsError(", ".join(invalid_runs))
+
+
 def _messages_to_items(messages: list[BaseMessage]) -> list[NeMoGymResponseInputItem | NeMoGymResponseOutputItem]:
     """Convert LangChain `messages` into Gym Responses API input/output items."""
     items = []
@@ -642,9 +748,7 @@ def _messages_to_usage(messages: list[BaseMessage]) -> NeMoGymResponseUsage | No
             usage.input_tokens += response_usage.input_tokens
             usage.input_tokens_details.cached_tokens += response_usage.input_tokens_details.cached_tokens
             usage.output_tokens += response_usage.output_tokens
-            usage.output_tokens_details.reasoning_tokens += (
-                response_usage.output_tokens_details.reasoning_tokens
-            )
+            usage.output_tokens_details.reasoning_tokens += response_usage.output_tokens_details.reasoning_tokens
             usage.total_tokens += response_usage.total_tokens
 
     return usage

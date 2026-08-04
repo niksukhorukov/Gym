@@ -252,6 +252,84 @@ class TestApp:
         assert res.status_code == 200
         assert res.json()["output"][0]["type"] == "mcp_call"
 
+    async def test_responses_preserves_provider_reasoning_content(self) -> None:
+        server = self._setup_server()
+        client = TestClient(server.setup_webserver())
+        server._client = MagicMock(spec=NeMoGymAsyncOpenAI)
+        server._client.create_response = AsyncMock(
+            return_value={
+                "id": "resp_reasoning",
+                "created_at": 0.0,
+                "model": "dummy_model",
+                "object": "response",
+                "output": [
+                    {
+                        "id": "reasoning_1",
+                        "type": "reasoning",
+                        "content": [{"type": "reasoning_text", "text": "GLM thought"}],
+                        "format": "unknown",
+                        "status": "completed",
+                        "summary": [],
+                    }
+                ],
+                "parallel_tool_calls": True,
+                "tool_choice": "auto",
+                "tools": [],
+            }
+        )
+
+        res = client.post("/v1/responses", json={"input": "think"})
+
+        assert res.status_code == 200
+        item = res.json()["output"][0]
+        assert item["content"] == [{"type": "reasoning_text", "text": "GLM thought"}]
+        assert item["format"] == "unknown"
+        assert "status" not in item
+
+    async def test_input_reasoning_replays_content_but_not_status(self) -> None:
+        server = self._setup_server()
+        client = TestClient(server.setup_webserver())
+        called_args = {}
+
+        async def mock_create_response(**kwargs):
+            nonlocal called_args
+            called_args = kwargs
+            return {
+                "id": "resp_1",
+                "created_at": 0.0,
+                "model": "dummy_model",
+                "object": "response",
+                "output": [],
+                "parallel_tool_calls": True,
+                "tool_choice": "auto",
+                "tools": [],
+            }
+
+        server._client = MagicMock(spec=NeMoGymAsyncOpenAI)
+        server._client.create_response = AsyncMock(side_effect=mock_create_response)
+        res = client.post(
+            "/v1/responses",
+            json={
+                "input": [
+                    {
+                        "id": "reasoning_1",
+                        "type": "reasoning",
+                        "content": [{"type": "reasoning_text", "text": "GLM thought"}],
+                        "format": "unknown",
+                        "status": "completed",
+                        "summary": [],
+                    },
+                    {"role": "user", "content": "continue", "type": "message"},
+                ]
+            },
+        )
+
+        assert res.status_code == 200
+        sent_reasoning = called_args["input"][0]
+        assert sent_reasoning["content"] == [{"type": "reasoning_text", "text": "GLM thought"}]
+        assert sent_reasoning["format"] == "unknown"
+        assert "status" not in sent_reasoning
+
     async def test_drop_input_reasoning_items_strips_reasoning(self, monkeypatch: MonkeyPatch) -> None:
         server = self._setup_server(drop_input_reasoning_items=True)
         client = TestClient(server.setup_webserver())

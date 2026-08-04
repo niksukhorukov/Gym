@@ -56,6 +56,7 @@ from nemo_gym.anthropic_utils import NeMoGymAnthropicMessage
 from nemo_gym.openai_utils import (
     NeMoGymEasyInputMessage,
     NeMoGymFunctionCallOutput,
+    NeMoGymReasoningSummary,
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
     NeMoGymResponseFunctionToolCall,
@@ -65,7 +66,7 @@ from nemo_gym.openai_utils import (
     NeMoGymResponseOutputTokensDetails,
     NeMoGymResponseReasoningItem,
     NeMoGymResponseUsage,
-    NeMoGymSummary,
+    reasoning_item_texts,
 )
 
 
@@ -252,7 +253,7 @@ class AnthropicConverter:
                     NeMoGymResponseReasoningItem(
                         id=f"rs_{uuid4().hex}",
                         summary=[
-                            NeMoGymSummary(
+                            NeMoGymReasoningSummary(
                                 text=block.get("thinking") or block.get("text", ""),
                                 type="summary_text",
                             )
@@ -391,7 +392,7 @@ class AnthropicConverter:
                 items.append(
                     NeMoGymResponseReasoningItem(
                         id=f"rs_{uuid4().hex}",
-                        summary=[NeMoGymSummary(text=block.get("thinking", ""), type="summary_text")],
+                        summary=[NeMoGymReasoningSummary(text=block.get("thinking", ""), type="summary_text")],
                         encrypted_content=block.get("signature"),
                         type="reasoning",
                     )
@@ -714,12 +715,12 @@ class AnthropicConverter:
 
     def _reasoning_item_to_anthropic_blocks(self, item: Dict[str, Any]) -> List[Dict[str, Any]]:
         blocks = []
-        for summary in item.get("summary", []):
+        for text in reasoning_item_texts(item):
             # Anthropic's ThinkingBlock requires a signature; open-model backends don't
             # produce one, so default to "" (the synthesized SSE never emits it anyway).
             block = {
                 "type": "thinking",
-                "thinking": summary["text"],
+                "thinking": text,
                 "signature": item.get("encrypted_content") or "",
             }
             blocks.append(block)
