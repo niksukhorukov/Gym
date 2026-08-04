@@ -12,7 +12,6 @@ from langgraph.graph.state import CompiledStateGraph
 
 SYSTEM_PROMPT = """You are a helpful general-purpose assistant. Answer briefly and to the point."""
 
-MAX_COMPLETION_TOKENS = 32768
 REQUEST_TIMEOUT_SECONDS = 300.0
 RESOURCE_SERVER_TIMEOUT_SECONDS = 300.0
 MAX_RETRIES = 0
@@ -146,11 +145,10 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
 def gemma_4_e2b_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E2B-it",
-        base_url="http://127.0.0.1:8016/v1",
+        base_url="http://127.0.0.1:8020/v1",
         api_key="EMPTY",
         temperature=1.0,
         top_p=0.95,
-        max_tokens=MAX_COMPLETION_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
@@ -166,11 +164,10 @@ def gemma_4_e2b_thinking() -> CompiledStateGraph:
 def gemma_4_e2b_non_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E2B-it",
-        base_url="http://127.0.0.1:8016/v1",
+        base_url="http://127.0.0.1:8020/v1",
         api_key="EMPTY",
         temperature=1.0,
         top_p=0.95,
-        max_tokens=MAX_COMPLETION_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
@@ -191,7 +188,6 @@ def gemma_4_e4b_thinking() -> CompiledStateGraph:
         api_key="EMPTY",
         temperature=1.0,
         top_p=0.95,
-        max_tokens=MAX_COMPLETION_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
@@ -211,7 +207,6 @@ def gemma_4_e4b_non_thinking() -> CompiledStateGraph:
         api_key="EMPTY",
         temperature=1.0,
         top_p=0.95,
-        max_tokens=MAX_COMPLETION_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
@@ -225,42 +220,38 @@ def gemma_4_e4b_non_thinking() -> CompiledStateGraph:
     return _create_subagent(model)
 
 
-def qwen3_5_4b_thinking() -> CompiledStateGraph:
+def gemma_4_12b_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
-        model="Qwen/Qwen3.5-4B",
+        model="google/gemma-4-12B-it",
         base_url="http://127.0.0.1:8022/v1",
         api_key="EMPTY",
         temperature=1.0,
         top_p=0.95,
-        presence_penalty=1.5,
-        max_tokens=MAX_COMPLETION_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
         use_responses_api=False,
         preserve_reasoning=True,
         extra_body={
-            "top_k": 20,
+            "top_k": 64,
         },
     )
     return _create_subagent(model)
 
 
-def qwen3_5_4b_non_thinking() -> CompiledStateGraph:
+def gemma_4_12b_non_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
-        model="Qwen/Qwen3.5-4B",
+        model="google/gemma-4-12B-it",
         base_url="http://127.0.0.1:8022/v1",
         api_key="EMPTY",
-        temperature=0.7,
-        top_p=0.8,
-        presence_penalty=1.5,
-        max_tokens=MAX_COMPLETION_TOKENS,
+        temperature=1.0,
+        top_p=0.95,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
         use_responses_api=False,
         extra_body={
-            "top_k": 20,
+            "top_k": 64,
             "include_reasoning": False,
             "chat_template_kwargs": {"enable_thinking": False},
         },
@@ -268,21 +259,40 @@ def qwen3_5_4b_non_thinking() -> CompiledStateGraph:
     return _create_subagent(model)
 
 
-def lfm2_5_8b_a1b_thinking() -> CompiledStateGraph:
+def gemma_4_26b_a4b_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
-        model="LiquidAI/LFM2.5-8B-A1B",
+        model="google/gemma-4-26B-A4B-it",
         base_url="http://127.0.0.1:8023/v1",
         api_key="EMPTY",
-        temperature=0.2,
-        max_tokens=MAX_COMPLETION_TOKENS,
+        temperature=1.0,
+        top_p=0.95,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=MAX_RETRIES,
         disable_streaming=True,
         use_responses_api=False,
         preserve_reasoning=True,
         extra_body={
-            "top_k": 80,
-            "repetition_penalty": 1.05,
+            "top_k": 64,
+        },
+    )
+    return _create_subagent(model)
+
+
+def gemma_4_26b_a4b_non_thinking() -> CompiledStateGraph:
+    model = ChatVLLM(
+        model="google/gemma-4-26B-A4B-it",
+        base_url="http://127.0.0.1:8023/v1",
+        api_key="EMPTY",
+        temperature=1.0,
+        top_p=0.95,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        max_retries=MAX_RETRIES,
+        disable_streaming=True,
+        use_responses_api=False,
+        extra_body={
+            "top_k": 64,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
         },
     )
     return _create_subagent(model)

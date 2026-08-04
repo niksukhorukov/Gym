@@ -1,6 +1,6 @@
 responses_create_params:
   temperature: 1.0
-  top_p: 0.95
+  top_p: 1.0
 
 workplace_assistant:
   resources_servers:
@@ -13,21 +13,14 @@ workplace_assistant:
 
 policy_model:
   responses_api_models:
-    vllm_model:
+    openai_model:
       entrypoint: app.py
-      base_url: http://127.0.0.1:8019/v1
-      api_key: EMPTY
-      model: Qwen/Qwen3.6-35B-A3B-FP8
-      return_token_id_information: false
-      uses_reasoning_parser: true
-      chat_template_kwargs:
-        enable_thinking: true
-        preserve_thinking: true
+      openai_base_url: https://openrouter.ai/api/v1
+      openai_api_key: ${policy_api_key}
+      openai_model: deepseek/deepseek-v4-flash-0731
       extra_body:
-        top_k: 20
-        min_p: 0.0
-        presence_penalty: 1.5
-        repetition_penalty: 1.0
+        reasoning:
+          effort: high
 
 workplace_assistant_decomposer_agent:
   responses_api_agents:

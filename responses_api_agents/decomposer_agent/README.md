@@ -2,16 +2,17 @@
 
 ## Workplace Assistant
 
-The Workplace config uses GLM-5.2 through OpenRouter as the Decomposer,
-thinking and non-thinking variants of Gemma-4-E4B and Qwen3.5-4B, and the
-thinking LFM2.5-8B-A1B as subagents. Set `policy_api_key` in
-`external/Gym/env.yaml` to an OpenRouter API key. From the project root, serve
-the three subagent models, each in its own terminal:
+The GLM-5.2 Workplace config uses GLM-5.2 through OpenRouter as the Decomposer
+and thinking and non-thinking variants of Gemma-4-E2B, Gemma-4-E4B,
+Gemma-4-12B, and Gemma-4-26B-A4B as eight subagent types. Set `policy_api_key`
+in `external/Gym/env.yaml` to an OpenRouter API key. From the project root,
+serve the four subagent models, each in its own terminal:
 
 ```bash
+scripts/vllm_serve_gemma_4_e2b.sh
 scripts/vllm_serve_gemma_4_e4b.sh
-scripts/vllm_serve_qwen3_5_4b.sh
-scripts/vllm_serve_lfm2_5_8b_a1b.sh
+scripts/vllm_serve_gemma_4_12b.sh
+scripts/vllm_serve_gemma_4_26b_a4b.sh
 ```
 
 Start `subagent_server/serve.sh`, then start Gym with:

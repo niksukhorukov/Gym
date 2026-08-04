@@ -3,11 +3,14 @@
     "."
   ],
   "graphs": {
+    "gemma_4_e2b_thinking": "./subagents.py:gemma_4_e2b_thinking",
+    "gemma_4_e2b_non_thinking": "./subagents.py:gemma_4_e2b_non_thinking",
     "gemma_4_e4b_thinking": "./subagents.py:gemma_4_e4b_thinking",
     "gemma_4_e4b_non_thinking": "./subagents.py:gemma_4_e4b_non_thinking",
-    "qwen3_5_4b_thinking": "./subagents.py:qwen3_5_4b_thinking",
-    "qwen3_5_4b_non_thinking": "./subagents.py:qwen3_5_4b_non_thinking",
-    "lfm2_5_8b_a1b_thinking": "./subagents.py:lfm2_5_8b_a1b_thinking"
+    "gemma_4_12b_thinking": "./subagents.py:gemma_4_12b_thinking",
+    "gemma_4_12b_non_thinking": "./subagents.py:gemma_4_12b_non_thinking",
+    "gemma_4_26b_a4b_thinking": "./subagents.py:gemma_4_26b_a4b_thinking",
+    "gemma_4_26b_a4b_non_thinking": "./subagents.py:gemma_4_26b_a4b_non_thinking"
   },
   "python_version": "3.12"
 }

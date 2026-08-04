@@ -3,7 +3,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from decomposer.prompts import workplace_assistant_task_45
 from fastapi import Response
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -200,9 +199,7 @@ def test_factories_can_be_imported_from_config():
     config = DecomposerAgentConfig.model_validate(
         config_data
         | {
-            "few_shot_message_factories": [
-                "decomposer.prompts:workplace_assistant_task_45"
-            ],
+            "few_shot_message_factories": ["builtins:list"],
             "response_for_verifier_factory": (
                 "responses_api_agents.decomposer_agent.app:"
                 "_subagent_tool_calls_and_final_message"
@@ -212,7 +209,7 @@ def test_factories_can_be_imported_from_config():
 
     assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
-    assert config.few_shot_message_factories == [workplace_assistant_task_45]
+    assert config.few_shot_message_factories == [list]
     assert (
         config.response_for_verifier_factory
         is _subagent_tool_calls_and_final_message
