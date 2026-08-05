@@ -10,8 +10,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 
 
-SYSTEM_PROMPT = """You are a helpful general-purpose assistant. Answer briefly and to the point."""
-
+SYSTEM_PROMPT = "You are a helpful assistant."
 REQUEST_TIMEOUT_SECONDS = 300.0
 RESOURCE_SERVER_TIMEOUT_SECONDS = 300.0
 MAX_RETRIES = 0
@@ -142,7 +141,7 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
     )
 
 
-def gemma_4_e2b_thinking() -> CompiledStateGraph:
+def gemma_4_2b_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E2B-it",
         base_url="http://127.0.0.1:8020/v1",
@@ -161,7 +160,7 @@ def gemma_4_e2b_thinking() -> CompiledStateGraph:
     return _create_subagent(model)
 
 
-def gemma_4_e2b_non_thinking() -> CompiledStateGraph:
+def gemma_4_2b_non_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E2B-it",
         base_url="http://127.0.0.1:8020/v1",
@@ -181,7 +180,7 @@ def gemma_4_e2b_non_thinking() -> CompiledStateGraph:
     return _create_subagent(model)
 
 
-def gemma_4_e4b_thinking() -> CompiledStateGraph:
+def gemma_4_4b_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E4B-it",
         base_url="http://127.0.0.1:8021/v1",
@@ -200,7 +199,7 @@ def gemma_4_e4b_thinking() -> CompiledStateGraph:
     return _create_subagent(model)
 
 
-def gemma_4_e4b_non_thinking() -> CompiledStateGraph:
+def gemma_4_4b_non_thinking() -> CompiledStateGraph:
     model = ChatVLLM(
         model="google/gemma-4-E4B-it",
         base_url="http://127.0.0.1:8021/v1",

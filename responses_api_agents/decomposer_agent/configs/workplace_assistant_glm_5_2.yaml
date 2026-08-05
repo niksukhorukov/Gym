@@ -35,22 +35,22 @@ workplace_assistant_decomposer_agent:
       join_gym_system_and_user_prompts: true
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
-        - subagent_type_id: gemma_4_e2b_thinking
-          assistant_id: gemma_4_e2b_thinking
+        - subagent_type_id: gemma_4_2b_thinking
+          assistant_id: gemma_4_2b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-E2B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_e2b_non_thinking
-          assistant_id: gemma_4_e2b_non_thinking
+          description: Tool-calling agent based on Gemma-4-2B with thinking enabled. Has access to all the workplace tools.
+        - subagent_type_id: gemma_4_2b_non_thinking
+          assistant_id: gemma_4_2b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-E2B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
-        - subagent_type_id: gemma_4_e4b_thinking
-          assistant_id: gemma_4_e4b_thinking
+          description: Tool-calling agent based on Gemma-4-2B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
+        - subagent_type_id: gemma_4_4b_thinking
+          assistant_id: gemma_4_4b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-E4B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_e4b_non_thinking
-          assistant_id: gemma_4_e4b_non_thinking
+          description: Tool-calling agent based on Gemma-4-4B with thinking enabled. Has access to all the workplace tools.
+        - subagent_type_id: gemma_4_4b_non_thinking
+          assistant_id: gemma_4_4b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-E4B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
+          description: Tool-calling agent based on Gemma-4-4B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
         - subagent_type_id: gemma_4_12b_thinking
           assistant_id: gemma_4_12b_thinking
           url: http://127.0.0.1:2024

@@ -12,10 +12,10 @@ function tools retain the previous tool-free behavior.
 
 | Assistant ID | Model | Endpoint | Thinking |
 | --- | --- | --- | --- |
-| `gemma_4_e2b_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Enabled |
-| `gemma_4_e2b_non_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Disabled |
-| `gemma_4_e4b_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Enabled |
-| `gemma_4_e4b_non_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Disabled |
+| `gemma_4_2b_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Enabled |
+| `gemma_4_2b_non_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Disabled |
+| `gemma_4_4b_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Enabled |
+| `gemma_4_4b_non_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Disabled |
 | `gemma_4_12b_thinking` | `google/gemma-4-12B-it` | `http://127.0.0.1:8022/v1` | Enabled |
 | `gemma_4_12b_non_thinking` | `google/gemma-4-12B-it` | `http://127.0.0.1:8022/v1` | Disabled |
 | `gemma_4_26b_a4b_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8023/v1` | Enabled |
