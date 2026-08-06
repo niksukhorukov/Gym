@@ -1,7 +1,7 @@
 # Decomposer subagent server
 
 This lightweight LangGraph server exposes the eight assistants registered in
-`langgraph.json`. Each assistant is compiled in `subagents.py` as a LangChain
+`langgraph.json`. Each assistant is compiled in `graphs.py` as a LangChain
 agent that receives one delegated task and returns a self-contained report.
 
 Tools are supplied per run through LangGraph runtime context. The shared
@@ -37,10 +37,10 @@ parameters are:
 Start the required local vLLM servers, then run:
 
 ```bash
-external/Gym/responses_api_agents/decomposer_agent/subagent_server/serve.sh
+external/Gym/responses_api_agents/decomposer_agent/subagents/serve.sh
 ```
 
-The server listens on `http://127.0.0.1:2024` by default. `serve.sh` launches
-`langgraph dev` using `langgraph.json` in an isolated uv environment, so its
-dependencies do not alter the root or Gym environments. `HOST` and `PORT` can
-override the default bind address and port.
+The server listens on `http://127.0.0.1:2024` by default. Its launcher uses this
+directory's `requirements.txt` in an isolated uv environment, so its dependencies
+do not alter the root or Gym environments. `HOST` and `PORT` can override the
+default bind address and port.

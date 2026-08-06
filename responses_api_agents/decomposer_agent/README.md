@@ -9,13 +9,19 @@ in `external/Gym/env.yaml` to an OpenRouter API key. From the project root,
 serve the four subagent models, each in its own terminal:
 
 ```bash
-scripts/vllm_serve_gemma_4_e2b.sh
-scripts/vllm_serve_gemma_4_e4b.sh
-scripts/vllm_serve_gemma_4_12b.sh
-scripts/vllm_serve_gemma_4_26b_a4b.sh
+scripts/vllm/serve_gemma_4_e2b.sh
+scripts/vllm/serve_gemma_4_e4b.sh
+scripts/vllm/serve_gemma_4_12b.sh
+scripts/vllm/serve_gemma_4_26b_a4b.sh
 ```
 
-Start `subagent_server/serve.sh`, then start Gym with:
+Start the subagent server:
+
+```bash
+external/Gym/responses_api_agents/decomposer_agent/subagents/serve.sh
+```
+
+Then start Gym with:
 
 ```bash
 cd external/Gym
