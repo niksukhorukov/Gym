@@ -3,7 +3,9 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from decomposer import create_decomposer_agent
 from fastapi import Response
+from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
 from nemo_gym.openai_utils import NeMoGymResponse, NeMoGymResponseCreateParamsNonStreaming
@@ -20,6 +22,7 @@ from responses_api_agents.decomposer_agent.app import (
     DecomposerAgentRunRequest,
     MissingFinalAssistantMessageError,
     NeMoGymContext,
+    NeMoGymDecomposerAgentMiddleware,
     UncollectedSubagentsError,
     _collect_subagent_tool_calls,
     _default_response_for_verifier_factory,
@@ -331,9 +334,27 @@ def test_factories_can_be_imported_from_config():
     )
 
     assert default_config.few_shot_message_factories == ()
+    assert default_config.max_tool_call_retries == 0
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
     assert config.few_shot_message_factories == [list]
     assert config.response_for_verifier_factory is _subagent_tool_calls_and_final_message
+
+
+@pytest.mark.parametrize("max_tool_call_retries", [-1, True, 1.5])
+def test_config_rejects_invalid_max_tool_call_retries(max_tool_call_retries):
+    with pytest.raises(ValueError):
+        DecomposerAgentConfig.model_validate(
+            {
+                "host": "127.0.0.1",
+                "port": 8000,
+                "entrypoint": "app.py",
+                "name": "decomposer",
+                "resources_server": {"type": "resources_servers", "name": "resources"},
+                "model_server": {"type": "responses_api_models", "name": "model"},
+                "subagent_types": [],
+                "max_tool_call_retries": max_tool_call_retries,
+            }
+        )
 
 
 def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_state():
@@ -469,6 +490,87 @@ def test_run_routes_uncollected_subagents_to_retryable_failure():
     assert "_ng_failure_terminal" not in result_data
 
 
+def test_run_returns_http_200_policy_exhaustion_as_primary_reward_zero_result():
+    factory_called = False
+
+    def response_for_verifier_factory(*_args):
+        nonlocal factory_called
+        factory_called = True
+        raise AssertionError("Policy exhaustion must not build a verifier response.")
+
+    response_data = _model_response()
+    response_data["output"] = [
+        {
+            "type": "function_call",
+            "name": "spawn_subagent",
+            "call_id": "final_a",
+            "arguments": "{}",
+            "status": "completed",
+        },
+        {
+            "type": "function_call",
+            "name": "wait",
+            "call_id": "final_b",
+            "arguments": "{}",
+            "status": "completed",
+        },
+    ]
+    failure = {
+        "class": "multiple_tool_calls_exhausted",
+        "attempts": 1,
+        "max_retries": 0,
+        "tool_call_counts": [2],
+        "tool_names": [["spawn_subagent", "wait"]],
+        "subagent_cancellation": {
+            "requested_run_ids": [],
+            "failures": [],
+        },
+    }
+    final_state = _final_state()
+    final_state["subagent_runs"] = {}
+    final_state["messages"] = [
+        {
+            "type": "ai",
+            "content": "",
+            "tool_calls": [
+                {"name": "spawn_subagent", "args": {}, "id": "final_a"},
+                {"name": "wait", "args": {}, "id": "final_b"},
+            ],
+        }
+    ]
+    final_state["decomposer_failure"] = failure
+    response_data["final_state"] = final_state
+    server_client = _FakeRunServerClient(response_data)
+    agent = DecomposerAgent.model_construct(
+        config=SimpleNamespace(
+            name="decomposer",
+            resources_server=SimpleNamespace(name="resources"),
+            response_for_verifier_factory=response_for_verifier_factory,
+        ),
+        server_client=server_client,
+    )
+
+    response = TestClient(agent.setup_webserver()).post(
+        "/run",
+        json={"responses_create_params": _body().model_dump(mode="json")},
+    )
+    result_data = response.json()
+
+    assert response.status_code == 200
+    assert factory_called is False
+    assert server_client.verify_request is None
+    assert result_data["reward"] == 0.0
+    assert result_data["decomposer_failure"] == failure
+    assert result_data["final_state"] == final_state
+    assert [item["type"] for item in result_data["response"]["output"]] == [
+        "function_call",
+        "function_call",
+    ]
+    assert NG_FAILURE_CLASS_KEY not in result_data
+    assert NG_FAILURE_DETAIL_KEY not in result_data
+    assert "_ng_failure_terminal" not in result_data
+
+
 def test_run_does_not_swallow_factory_runtime_error():
     def failing_factory(*_args):
         raise RuntimeError("factory failed")
@@ -526,6 +628,167 @@ def test_chat_nemo_gym_preserves_model_params_and_overrides_tools():
     assert sent["input"] == [{"type": "message", "role": "user", "content": "runtime prompt"}]
     assert sent["tools"] == [_decomposer_tool()]
     assert sent["tool_choice"] == "auto"
+
+
+def test_graph_retries_from_identical_history_without_replaying_rejected_cookies():
+    responses = [_multi_tool_model_response(attempt) for attempt in range(1, 4)]
+
+    server_client = _SequencedServerClient(responses)
+    graph = create_decomposer_agent(
+        decomposer_model=ChatNeMoGym(
+            server_client=server_client,
+            model_server_name="model",
+        ),
+        subagent_types=[
+            {
+                "subagent_type_id": "test",
+                "description": "Test subagent",
+                "assistant_id": "test",
+                "url": "http://subagents.test",
+            }
+        ],
+        max_tool_call_retries=2,
+        middleware=[NeMoGymDecomposerAgentMiddleware()],
+        context_schema=NeMoGymContext,
+    )
+    body = _body()
+
+    final_state = asyncio.run(
+        graph.ainvoke(
+            {"messages": [HumanMessage(content="runtime prompt")]},
+            context={
+                "body": body.model_dump(mode="json", exclude_unset=True),
+                "resource_server_url": "http://resources.test",
+                "resource_server_cookies": {},
+            },
+        )
+    )
+
+    assert len(server_client.requests) == 3
+    assert [request["cookies"] for request in server_client.requests] == [None, None, None]
+    sent_inputs = [request["json"].input for request in server_client.requests]
+    assert sent_inputs[0] == sent_inputs[1] == sent_inputs[2]
+    assert len(final_state["messages"]) == 2
+    assert final_state["messages"][-1].tool_calls == [
+        {"name": "spawn_subagent", "args": {}, "id": "attempt_3_spawn", "type": "tool_call"},
+        {"name": "wait", "args": {}, "id": "attempt_3_wait", "type": "tool_call"},
+    ]
+    assert final_state["decomposer_failure"]["attempts"] == 3
+    assert final_state["decomposer_retry_diagnostics"][0]["discarded_usage"] == [
+        {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+    ]
+
+
+def test_graph_retry_limit_one_recovers_from_identical_history():
+    server_client = _SequencedServerClient([_multi_tool_model_response(1), _model_response()])
+    graph = create_decomposer_agent(
+        decomposer_model=ChatNeMoGym(
+            server_client=server_client,
+            model_server_name="model",
+        ),
+        subagent_types=[
+            {
+                "subagent_type_id": "test",
+                "description": "Test subagent",
+                "assistant_id": "test",
+                "url": "http://subagents.test",
+            }
+        ],
+        max_tool_call_retries=1,
+        middleware=[NeMoGymDecomposerAgentMiddleware()],
+        context_schema=NeMoGymContext,
+    )
+    body = _body()
+
+    final_state = asyncio.run(
+        graph.ainvoke(
+            {"messages": [HumanMessage(content="runtime prompt")]},
+            context={
+                "body": body.model_dump(mode="json", exclude_unset=True),
+                "resource_server_url": "http://resources.test",
+                "resource_server_cookies": {},
+            },
+        )
+    )
+
+    assert len(server_client.requests) == 2
+    assert [request["cookies"] for request in server_client.requests] == [None, None]
+    assert server_client.requests[0]["json"].input == server_client.requests[1]["json"].input
+    assert len(final_state["messages"]) == 2
+    assert final_state["messages"][-1].content == "done"
+    assert final_state["decomposer_retry_diagnostics"] == [
+        {
+            "outcome": "recovered",
+            "attempts": 2,
+            "max_retries": 1,
+            "discarded_attempts": 1,
+            "discarded_tool_call_counts": [2],
+            "discarded_tool_names": [["spawn_subagent", "wait"]],
+            "discarded_usage": [{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}],
+        }
+    ]
+    assert "decomposer_failure" not in final_state
+
+
+def test_graph_retry_limit_zero_exhausts_after_one_attempt():
+    server_client = _SequencedServerClient([_multi_tool_model_response(1)])
+    graph = create_decomposer_agent(
+        decomposer_model=ChatNeMoGym(
+            server_client=server_client,
+            model_server_name="model",
+        ),
+        subagent_types=[
+            {
+                "subagent_type_id": "test",
+                "description": "Test subagent",
+                "assistant_id": "test",
+                "url": "http://subagents.test",
+            }
+        ],
+        max_tool_call_retries=0,
+        middleware=[NeMoGymDecomposerAgentMiddleware()],
+        context_schema=NeMoGymContext,
+    )
+
+    final_state = asyncio.run(
+        graph.ainvoke(
+            {"messages": [HumanMessage(content="runtime prompt")]},
+            context={
+                "body": _body().model_dump(mode="json", exclude_unset=True),
+                "resource_server_url": "http://resources.test",
+                "resource_server_cookies": {},
+            },
+        )
+    )
+
+    assert len(server_client.requests) == 1
+    assert final_state["messages"][-1].tool_calls == [
+        {
+            "name": "spawn_subagent",
+            "args": {},
+            "id": "attempt_1_spawn",
+            "type": "tool_call",
+        },
+        {
+            "name": "wait",
+            "args": {},
+            "id": "attempt_1_wait",
+            "type": "tool_call",
+        },
+    ]
+    assert final_state["decomposer_failure"] == {
+        "class": "multiple_tool_calls_exhausted",
+        "attempts": 1,
+        "max_retries": 0,
+        "tool_call_counts": [2],
+        "tool_names": [["spawn_subagent", "wait"]],
+        "subagent_cancellation": {
+            "requested_run_ids": [],
+            "failures": [],
+        },
+    }
+    assert final_state["decomposer_retry_diagnostics"][0]["discarded_attempts"] == 0
 
 
 def test_responses_omits_unset_body_fields_from_runtime_context():
@@ -597,6 +860,20 @@ class _FakeServerClient:
     async def post(self, **kwargs):
         self.requests.append(kwargs)
         return _FakeModelResponse()
+
+
+class _SequencedServerClient:
+    def __init__(self, responses):
+        self.responses = responses
+        self.requests = []
+
+    async def post(self, **kwargs):
+        self.requests.append(kwargs)
+        response_index = len(self.requests) - 1
+        return _FakeJSONResponse(
+            self.responses[response_index],
+            {"rejected_attempt": str(response_index + 1)},
+        )
 
 
 class _FakeModelResponse:
@@ -727,6 +1004,34 @@ def _model_response():
             "total_tokens": 2,
         },
     }
+
+
+def _multi_tool_model_response(attempt):
+    response = _model_response()
+    response["output"] = [
+        {
+            "type": "function_call",
+            "name": "spawn_subagent",
+            "call_id": f"attempt_{attempt}_spawn",
+            "arguments": "{}",
+            "status": "completed",
+        },
+        {
+            "type": "function_call",
+            "name": "wait",
+            "call_id": f"attempt_{attempt}_wait",
+            "arguments": "{}",
+            "status": "completed",
+        },
+    ]
+    response["usage"] = {
+        "input_tokens": attempt,
+        "input_tokens_details": {"cached_tokens": 0},
+        "output_tokens": 1,
+        "output_tokens_details": {"reasoning_tokens": 0},
+        "total_tokens": attempt + 1,
+    }
+    return response
 
 
 def _outer_tool():

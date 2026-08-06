@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ConfigDict, ImportString
+from pydantic import ConfigDict, Field, ImportString
 
 from nemo_gym.base_resources_server import (
     AggregateMetrics,
@@ -293,6 +293,7 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
     subagent_types: Sequence[SubagentType]
+    max_tool_call_retries: int = Field(default=0, ge=0, strict=True)
     few_shot_message_factories: Sequence[
         ImportString[Callable[[], Sequence[dict[str, Any]]]]
     ] = ()
@@ -346,6 +347,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
                 model_server_name=self.config.model_server.name,
             ),
             subagent_types=self.config.subagent_types,
+            max_tool_call_retries=self.config.max_tool_call_retries,
             middleware=[NeMoGymDecomposerAgentMiddleware()],
             context_schema=NeMoGymContext,
         )
@@ -442,6 +444,21 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         nemo_gym_response = NeMoGymResponse.model_validate(
             decomposer_agent_response.model_dump(mode="json", exclude={"final_state"})
         )
+        decomposer_failure = decomposer_agent_response.final_state.get("decomposer_failure")
+        if decomposer_failure is not None:
+            # Policy exhaustion is a completed, reward-zero rollout. Preserve the
+            # failed trace and graph diagnostics in the primary rollout record,
+            # but do not send unmatched tool calls to the task verifier.
+            return DecomposerAgentVerifyResponse.model_validate(
+                body.model_dump(mode="json")
+                | {
+                    "response": nemo_gym_response.model_dump(mode="json"),
+                    "final_state": decomposer_agent_response.final_state,
+                    "reward": 0.0,
+                    "decomposer_failure": decomposer_failure,
+                }
+            )
+
         try:
             _validate_decomposer_rollout(
                 nemo_gym_response,

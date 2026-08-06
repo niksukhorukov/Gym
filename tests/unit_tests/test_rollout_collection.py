@@ -859,6 +859,77 @@ class TestRolloutCollection:
         assert [result["case"] for result in actual_failure_results] == ["case-1"]
         assert actual_failure_results[0][NG_FAILURE_CLASS_KEY] == "verify_failed"
 
+    async def test_policy_exhaustion_is_primary_and_collection_continues(
+        self, tmp_path: Path, empty_global_config: MagicMock
+    ) -> None:
+        input_jsonl_fpath = tmp_path / "input.jsonl"
+        samples = [
+            json.dumps(
+                {
+                    "responses_create_params": {"input": []},
+                    "agent_ref": {"name": "my agent name"},
+                    "x": i,
+                }
+            )
+            for i in range(2)
+        ]
+        input_jsonl_fpath.write_text("\n".join(samples) + "\n")
+        output_jsonl_fpath = tmp_path / "output.jsonl"
+        config = RolloutCollectionConfig(
+            input_jsonl_fpath=str(input_jsonl_fpath),
+            output_jsonl_fpath=str(output_jsonl_fpath),
+            limit=2,
+            num_repeats=1,
+        )
+
+        captured: dict[str, list[dict]] = {}
+
+        class TestRolloutCollectionHelper(RolloutCollectionHelper):
+            def run_examples(self, examples: list[dict], *args, **kwargs):
+                futures = []
+                for example in examples:
+                    future = Future()
+                    if example["x"] == 0:
+                        result = {
+                            "case": "exhausted",
+                            "reward": 0.0,
+                            "decomposer_failure": {
+                                "class": "multiple_tool_calls_exhausted",
+                                "attempts": 3,
+                            },
+                        }
+                    else:
+                        result = {"case": "subsequent", "reward": 1.0}
+                    future.set_result((example, result))
+                    futures.append(future)
+                return futures
+
+            async def _call_aggregate_metrics(self, results, rows, output_fpath):
+                captured["results"] = results
+                captured["rows"] = rows
+                return None
+
+        returned_results = await TestRolloutCollectionHelper().run_from_config(config)
+
+        assert [result["case"] for result in returned_results] == [
+            "exhausted",
+            "subsequent",
+        ]
+        assert [result["case"] for result in captured["results"]] == [
+            "exhausted",
+            "subsequent",
+        ]
+        with output_jsonl_fpath.open() as f:
+            primary_results = [json.loads(line) for line in f]
+        assert [result["case"] for result in primary_results] == [
+            "exhausted",
+            "subsequent",
+        ]
+        assert NG_FAILURE_CLASS_KEY not in primary_results[0]
+
+        failures_fpath = _failures_path_for(output_jsonl_fpath)
+        assert failures_fpath.read_text() == ""
+
     async def test_run_from_config_aggregate_metrics_includes_cached_persisted_rows(
         self, tmp_path: Path, empty_global_config: MagicMock
     ) -> None:
