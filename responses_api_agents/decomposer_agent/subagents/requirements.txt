@@ -1,3 +1,4 @@
+-e decomposer @ ../../../../..
 langchain>=1.3.6,<2
 langchain-core>=1.4.0,<2
 langchain-openai>=1.3.3,<2

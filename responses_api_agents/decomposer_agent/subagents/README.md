@@ -1,7 +1,7 @@
 # Decomposer subagent server
 
 This lightweight LangGraph server exposes the eight assistants registered in
-`langgraph.json`. Each assistant is compiled in `graphs.py` as a LangChain
+`langgraph.json`. Each assistant is compiled in `graph.py` as a LangChain
 agent that receives one delegated task and returns a self-contained report.
 
 Tools are supplied per run through LangGraph runtime context. The shared

@@ -31,38 +31,38 @@ workplace_assistant_decomposer_agent:
       join_gym_system_and_user_prompts: true
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
-        - subagent_type_id: gemma_4_2b_thinking
+        - subagent_type_id: tiny_thinking
           assistant_id: gemma_4_2b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-2B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_2b_non_thinking
+          description: Tool-calling agent based on a tiny thinking model. Has access to all the workplace tools.
+        - subagent_type_id: tiny_non_thinking
           assistant_id: gemma_4_2b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-2B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
-        - subagent_type_id: gemma_4_4b_thinking
+          description: Tool-calling agent based on a tiny non-thinking model. Has access to all the workplace tools.
+        - subagent_type_id: small_thinking
           assistant_id: gemma_4_4b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-4B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_4b_non_thinking
+          description: Tool-calling agent based on a small thinking model. Has access to all the workplace tools.
+        - subagent_type_id: small_non_thinking
           assistant_id: gemma_4_4b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-4B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
-        - subagent_type_id: gemma_4_12b_thinking
+          description: Tool-calling agent based on a small non-thinking model. Has access to all the workplace tools.
+        - subagent_type_id: medium_thinking
           assistant_id: gemma_4_12b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-12B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_12b_non_thinking
+          description: Tool-calling agent based on a medium thinking model. Has access to all the workplace tools.
+        - subagent_type_id: medium_non_thinking
           assistant_id: gemma_4_12b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-12B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
-        - subagent_type_id: gemma_4_26b_a4b_thinking
+          description: Tool-calling agent based on a medium non-thinking model. Has access to all the workplace tools.
+        - subagent_type_id: large_thinking
           assistant_id: gemma_4_26b_a4b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-26B-A4B with thinking enabled. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_26b_a4b_non_thinking
+          description: Tool-calling agent based on a large thinking model. Has access to all the workplace tools.
+        - subagent_type_id: large_non_thinking
           assistant_id: gemma_4_26b_a4b_non_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on Gemma-4-26B-A4B with thinking disabled. Has access to all the workplace tools. Faster than thinking models.
+          description: Tool-calling agent based on a large non-thinking model. Has access to all the workplace tools.
       datasets:
         - name: train
           type: train

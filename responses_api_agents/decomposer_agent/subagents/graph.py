@@ -2,7 +2,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from chat_vllm import ChatVLLM
+from decomposer.chat_vllm import ChatVLLM
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse, ToolCallRequest
