@@ -2,6 +2,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from decomposer.chat_vllm import ChatVLLM
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
@@ -10,7 +11,6 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 
 
-SYSTEM_PROMPT = "You are a helpful assistant."
 REQUEST_TIMEOUT_SECONDS = 300.0
 RESOURCE_SERVER_TIMEOUT_SECONDS = 300.0
 MAX_RETRIES = 0
@@ -137,7 +137,7 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
         model=model,
         tools=[],
         middleware=[NeMoGymSubagentMiddleware()],
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=SUBAGENT_SYSTEM_PROMPT,
     )
 
 
