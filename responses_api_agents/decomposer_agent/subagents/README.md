@@ -1,7 +1,7 @@
 # Decomposer subagent server
 
 This lightweight LangGraph server exposes the
-`gemma_4_26b_a4b_non_thinking` assistant registered in `langgraph.json`. It is
+`gemma_4_26b_a4b_thinking` assistant registered in `langgraph.json`. It is
 compiled in `graph.py` as a LangChain agent that receives one delegated task
 and returns a self-contained report.
 
@@ -13,18 +13,18 @@ function tools retain the previous tool-free behavior.
 
 | Assistant ID | Model | Endpoint | Thinking |
 | --- | --- | --- | --- |
-| `gemma_4_26b_a4b_non_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8023/v1` | Disabled |
+| `gemma_4_26b_a4b_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8023/v1` | Enabled |
 
-The assistant explicitly disables reasoning output. No explicit completion
-limit is set, so vLLM uses the model context remaining after the prompt. It
-uses a 300-second request timeout, no retries, disabled streaming, and the Chat
-Completions API.
+The assistant preserves reasoning across tool-calling turns. No explicit
+completion limit is set, so vLLM uses the model context remaining after the
+prompt. It uses a 300-second request timeout, no retries, disabled streaming,
+and the Chat Completions API.
 
 Its sampling parameters are:
 
 | Model mode | Temperature | `top_p` | `top_k` | Other parameters |
 | --- | ---: | ---: | ---: | --- |
-| Gemma non-thinking | 1.0 | 0.95 | 64 | — |
+| Gemma thinking | 1.0 | 0.95 | 64 | — |
 
 Start the required local vLLM server, then run:
 

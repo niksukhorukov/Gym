@@ -59,14 +59,14 @@ workplace_assistant_decomposer_agent:
         #   assistant_id: gemma_4_12b_non_thinking
         #   url: http://127.0.0.1:2024
         #   description: Tool-calling agent based on a Gemma-4-12B non-thinking model. Has access to all the workplace tools.
-        # - subagent_type_id: gemma_4_26b_a4b_thinking
-        #   assistant_id: gemma_4_26b_a4b_thinking
-        #   url: http://127.0.0.1:2024
-        #   description: Tool-calling agent based on a Gemma-4-26B-A4B thinking model. Has access to all the workplace tools.
-        - subagent_type_id: gemma_4_26b_a4b_non_thinking
-          assistant_id: gemma_4_26b_a4b_non_thinking
+        - subagent_type_id: gemma_4_26b_a4b_thinking
+          assistant_id: gemma_4_26b_a4b_thinking
           url: http://127.0.0.1:2024
-          description: Tool-calling agent based on a Gemma-4-26B-A4B non-thinking model. Has access to all the workplace tools.
+          description: Tool-calling agent based on a Gemma-4-26B-A4B thinking model. Has access to all the workplace tools.
+        # - subagent_type_id: gemma_4_26b_a4b_non_thinking
+        #   assistant_id: gemma_4_26b_a4b_non_thinking
+        #   url: http://127.0.0.1:2024
+        #   description: Tool-calling agent based on a Gemma-4-26B-A4B non-thinking model. Has access to all the workplace tools.
       datasets:
         - name: train
           type: train
