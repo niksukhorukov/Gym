@@ -1,8 +1,12 @@
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from decomposer.core import SubagentType, create_decomposer_agent
+from decomposer.prompts import (
+    DECOMPOSER_SYSTEM_PROMPT,
+    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+)
 from fastapi import Body, Request, Response
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -44,6 +48,10 @@ UNCOLLECTED_SUBAGENTS_MESSAGE = "Decomposer finalized before collecting all suba
 NG_FAILURE_CLASS_KEY = "_ng_failure_class"
 NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
 TERMINAL_SUBAGENT_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
+_DECOMPOSER_SYSTEM_PROMPTS = {
+    "student": DECOMPOSER_SYSTEM_PROMPT,
+    "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+}
 
 
 class DecomposerRolloutValidationError(RuntimeError):
@@ -293,10 +301,9 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
     subagent_types: Sequence[SubagentType]
-    few_shot_message_factories: Sequence[
-        ImportString[Callable[[], Sequence[dict[str, Any]]]]
-    ] = ()
+    few_shot_message_factories: Sequence[ImportString[Callable[[], Sequence[dict[str, Any]]]]] = ()
     join_gym_system_and_user_prompts: bool = False
+    decomposer_system_prompt_profile: Literal["student", "teacher"] = "student"
     response_for_verifier_factory: ImportString[
         Callable[
             [
@@ -327,6 +334,22 @@ class DecomposerAgentResponse(NeMoGymResponse):
     final_state: dict[str, Any]
 
 
+def _create_decomposer_graph(
+    server_client: Any,
+    config: DecomposerAgentConfig,
+) -> Any:
+    return create_decomposer_agent(
+        decomposer_model=ChatNeMoGym(
+            server_client=server_client,
+            model_server_name=config.model_server.name,
+        ),
+        subagent_types=config.subagent_types,
+        decomposer_system_prompt=_DECOMPOSER_SYSTEM_PROMPTS[config.decomposer_system_prompt_profile],
+        middleware=[NeMoGymDecomposerAgentMiddleware()],
+        context_schema=NeMoGymContext,
+    )
+
+
 class DecomposerAgent(SimpleResponsesAPIAgent):
     """Gym agent server for the first Decomposer version.
 
@@ -339,16 +362,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        self.graph = create_decomposer_agent(
-            decomposer_model=ChatNeMoGym(
-                server_client=self.server_client,
-                model_server_name=self.config.model_server.name,
-            ),
-            subagent_types=self.config.subagent_types,
-            middleware=[NeMoGymDecomposerAgentMiddleware()],
-            context_schema=NeMoGymContext,
-        )
+        self.graph = _create_decomposer_graph(self.server_client, self.config)
 
     def _resources_server_base_url(self) -> str:
         config = get_first_server_config_dict(
@@ -369,11 +383,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
             body.input,
             join_gym_system_and_user_prompts=self.config.join_gym_system_and_user_prompts,
         )
-        few_shot_messages = [
-            message
-            for factory in self.config.few_shot_message_factories
-            for message in factory()
-        ]
+        few_shot_messages = [message for factory in self.config.few_shot_message_factories for message in factory()]
         initial_messages = [*few_shot_messages, *input_messages]
         initial_state = {"messages": initial_messages}
         final_state = await self.graph.ainvoke(
