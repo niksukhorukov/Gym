@@ -1,11 +1,18 @@
 import json
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from decomposer.chat_vllm import ChatVLLM
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse, ToolCallRequest
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
 from langchain_core.messages import ToolMessage
 from langgraph.graph.state import CompiledStateGraph
 
@@ -14,6 +21,11 @@ SYSTEM_PROMPT = "You are a helpful assistant."
 REQUEST_TIMEOUT_SECONDS = 300.0
 RESOURCE_SERVER_TIMEOUT_SECONDS = 300.0
 MAX_RETRIES = 0
+SUBAGENT_MAX_MODEL_CALLS = int(
+    os.environ.get("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS", "100")
+)
+if SUBAGENT_MAX_MODEL_CALLS < 1:
+    raise ValueError("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS must be at least 1")
 
 
 class NeMoGymSubagentMiddleware(AgentMiddleware):
@@ -136,7 +148,13 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
     return create_agent(
         model=model,
         tools=[],
-        middleware=[NeMoGymSubagentMiddleware()],
+        middleware=[
+            NeMoGymSubagentMiddleware(),
+            ModelCallLimitMiddleware(
+                run_limit=SUBAGENT_MAX_MODEL_CALLS,
+                exit_behavior="error",
+            ),
+        ],
         system_prompt=SYSTEM_PROMPT,
     )
 

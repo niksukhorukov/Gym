@@ -8,14 +8,19 @@ from decomposer.prompts import (
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
 )
 from fastapi import Body, Request, Response
-from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import ConfigDict, ImportString
+from pydantic import ConfigDict, Field, ImportString
 
 from nemo_gym.base_resources_server import (
     AggregateMetrics,
@@ -45,6 +50,8 @@ MISSING_FINAL_ASSISTANT_FAILURE_CLASS = "decomposer_missing_final_assistant_mess
 MISSING_FINAL_ASSISTANT_MESSAGE = "Decomposer response did not contain a final assistant message."
 UNCOLLECTED_SUBAGENTS_FAILURE_CLASS = "decomposer_uncollected_subagents"
 UNCOLLECTED_SUBAGENTS_MESSAGE = "Decomposer finalized before collecting all subagent reports"
+MANAGER_MODEL_CALL_LIMIT_FAILURE_CLASS = "decomposer_manager_model_call_limit"
+MODEL_CALL_LIMIT_MESSAGE_PREFIX = "Model call limits exceeded:"
 NG_FAILURE_CLASS_KEY = "_ng_failure_class"
 NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
 TERMINAL_SUBAGENT_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
@@ -80,6 +87,13 @@ class UncollectedSubagentsError(DecomposerRolloutValidationError):
             UNCOLLECTED_SUBAGENTS_FAILURE_CLASS,
             f"{UNCOLLECTED_SUBAGENTS_MESSAGE}: {details}.",
         )
+
+
+class ManagerModelCallLimitError(DecomposerRolloutValidationError):
+    """The Decomposer manager exhausted its per-rollout model-call budget."""
+
+    def __init__(self, detail: str):
+        super().__init__(MANAGER_MODEL_CALL_LIMIT_FAILURE_CLASS, detail)
 
 
 class ChatNeMoGym(BaseChatModel):
@@ -304,6 +318,8 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     few_shot_message_factories: Sequence[ImportString[Callable[[], Sequence[dict[str, Any]]]]] = ()
     join_gym_system_and_user_prompts: bool = False
     decomposer_system_prompt_profile: Literal["student", "teacher"] = "student"
+    manager_max_model_calls: int = Field(default=100, ge=1)
+    subagent_recursion_limit: int = Field(default=1000, ge=1)
     response_for_verifier_factory: ImportString[
         Callable[
             [
@@ -345,8 +361,15 @@ def _create_decomposer_graph(
         ),
         subagent_types=config.subagent_types,
         decomposer_system_prompt=_DECOMPOSER_SYSTEM_PROMPTS[config.decomposer_system_prompt_profile],
-        middleware=[NeMoGymDecomposerAgentMiddleware()],
+        middleware=[
+            NeMoGymDecomposerAgentMiddleware(),
+            ModelCallLimitMiddleware(
+                run_limit=config.manager_max_model_calls,
+                exit_behavior="end",
+            ),
+        ],
         context_schema=NeMoGymContext,
+        subagent_recursion_limit=config.subagent_recursion_limit,
     )
 
 
@@ -642,6 +665,8 @@ def _validate_decomposer_rollout(
     terminal_type = _item_get(terminal_message, "type")
     terminal_content = _message_content_to_text(_item_get(terminal_message, "content", ""))
     terminal_tool_calls = _item_get(terminal_message, "tool_calls", []) or []
+    if terminal_content.startswith(MODEL_CALL_LIMIT_MESSAGE_PREFIX):
+        raise ManagerModelCallLimitError(terminal_content)
     if terminal_type != "ai" or terminal_tool_calls or not terminal_content.strip():
         raise MissingFinalAssistantMessageError()
 

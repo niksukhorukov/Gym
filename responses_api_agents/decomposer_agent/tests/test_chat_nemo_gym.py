@@ -8,10 +8,12 @@ from decomposer.prompts import (
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
 )
 from fastapi import Response
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 
 from nemo_gym.openai_utils import NeMoGymResponse, NeMoGymResponseCreateParamsNonStreaming
 from responses_api_agents.decomposer_agent.app import (
+    MANAGER_MODEL_CALL_LIMIT_FAILURE_CLASS,
     MISSING_FINAL_ASSISTANT_FAILURE_CLASS,
     NG_FAILURE_CLASS_KEY,
     NG_FAILURE_DETAIL_KEY,
@@ -22,6 +24,7 @@ from responses_api_agents.decomposer_agent.app import (
     DecomposerAgentConfig,
     DecomposerAgentResponse,
     DecomposerAgentRunRequest,
+    ManagerModelCallLimitError,
     MissingFinalAssistantMessageError,
     NeMoGymContext,
     UncollectedSubagentsError,
@@ -231,6 +234,23 @@ def test_validate_decomposer_rollout_requires_graph_messages():
         )
 
 
+def test_validate_decomposer_rollout_classifies_manager_call_limit():
+    final_state = _final_state()
+    final_state["messages"] = [
+        {
+            "type": "ai",
+            "content": "Model call limits exceeded: run limit (100/100)",
+            "tool_calls": [],
+        }
+    ]
+
+    with pytest.raises(ManagerModelCallLimitError):
+        _validate_decomposer_rollout(
+            NeMoGymResponse.model_validate(_model_response()),
+            final_state,
+        )
+
+
 @pytest.mark.parametrize("status", sorted(TERMINAL_SUBAGENT_STATUSES))
 def test_validate_decomposer_rollout_accepts_collected_terminal_reports(status):
     final_state = _final_state()
@@ -337,6 +357,8 @@ def test_factories_can_be_imported_from_config():
     )
 
     assert default_config.decomposer_system_prompt_profile == "student"
+    assert default_config.manager_max_model_calls == 100
+    assert default_config.subagent_recursion_limit == 1000
     assert config.decomposer_system_prompt_profile == "teacher"
     assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
@@ -370,10 +392,20 @@ def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_p
         model_server=SimpleNamespace(name="model"),
         subagent_types=[],
         decomposer_system_prompt_profile=profile,
+        manager_max_model_calls=100,
+        subagent_recursion_limit=1000,
     )
 
     assert _create_decomposer_graph(_FakeServerClient(), config) is graph
     assert captured["decomposer_system_prompt"] == expected_prompt
+    assert captured["subagent_recursion_limit"] == 1000
+    limiter = next(
+        item
+        for item in captured["middleware"]
+        if isinstance(item, ModelCallLimitMiddleware)
+    )
+    assert limiter.run_limit == 100
+    assert limiter.exit_behavior == "end"
 
 
 def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_state():
@@ -465,6 +497,40 @@ def test_run_routes_missing_final_message_to_retryable_failure():
     assert result_data["response"]["output"][0]["content"][0]["text"] == "I am still reasoning."
     assert "_ng_failure_terminal" not in result_data
     assert "final_state" not in result_data["response"]
+
+
+def test_run_routes_manager_call_limit_to_failed_rollout_without_verifier():
+    response_data = _model_response()
+    response_data["final_state"] = _final_state()
+    response_data["final_state"]["messages"] = [
+        {
+            "type": "ai",
+            "content": "Model call limits exceeded: run limit (100/100)",
+            "tool_calls": [],
+        }
+    ]
+    server_client = _FakeRunServerClient(response_data)
+    agent = DecomposerAgent.model_construct(
+        config=SimpleNamespace(
+            name="decomposer",
+            resources_server=SimpleNamespace(name="resources"),
+            response_for_verifier_factory=_subagent_tool_calls_and_final_message,
+        ),
+        server_client=server_client,
+    )
+
+    result = asyncio.run(
+        agent.run(
+            SimpleNamespace(cookies={"initial": "cookie"}),
+            DecomposerAgentRunRequest(responses_create_params=_body()),
+        )
+    )
+    result_data = result.model_dump(mode="json")
+
+    assert server_client.verify_request is None
+    assert result.reward == 0.0
+    assert result_data[NG_FAILURE_CLASS_KEY] == MANAGER_MODEL_CALL_LIMIT_FAILURE_CLASS
+    assert "run limit (100/100)" in result_data[NG_FAILURE_DETAIL_KEY]
 
 
 def test_run_routes_uncollected_subagents_to_retryable_failure():
