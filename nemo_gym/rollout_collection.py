@@ -89,8 +89,10 @@ from nemo_gym.skills import SkillsConfig, load_skill_directory
 # ---------------------------------------------------------------------------
 
 NG_FAILURE_CLASS_KEY = "_ng_failure_class"
+NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
 NG_NO_PERSIST_KEY = "_ng_no_persist"
 NG_TERMINAL_KEY = "_ng_failure_terminal"
+NG_ROLLOUT_ERROR_KEY = "_ng_rollout_error"
 
 _DEFAULT_MAX_ROLLOUT_ATTEMPTS = 3
 
@@ -117,6 +119,51 @@ def _get_max_rollout_attempts() -> int:
 def _failures_path_for(output_fpath: Path) -> Path:
     """Sidecar path used by the dispatcher and ``_load_from_cache``."""
     return output_fpath.with_name(output_fpath.stem + "_failures.jsonl")
+
+
+def _bounded_rollout_error_detail(detail: Any, *, limit: int = 4096) -> str:
+    """Return diagnostic text without allowing an error body to bloat JSONL output."""
+    if detail is None:
+        text = "No error detail returned."
+    elif isinstance(detail, str):
+        text = detail
+    else:
+        try:
+            text = json.dumps(detail, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            text = repr(detail)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... [truncated to {limit} characters]"
+
+
+def _zero_scored_rollout_result(
+    row: Dict[str, Any],
+    *,
+    error_type: str,
+    status_code: Optional[int],
+    detail: Any,
+) -> Dict[str, Any]:
+    """Build a main-output-compatible reward-0 record for one failed attempt."""
+    return {
+        RESPONSES_CREATE_PARAMS_KEY_NAME: deepcopy(row.get(RESPONSES_CREATE_PARAMS_KEY_NAME, {})),
+        "response": {
+            "id": "rollout_error",
+            "created_at": 0.0,
+            "model": "rollout_error",
+            "object": "response",
+            "output": [],
+            "parallel_tool_calls": False,
+            "tool_choice": "auto",
+            "tools": [],
+        },
+        "reward": 0.0,
+        NG_ROLLOUT_ERROR_KEY: {
+            "type": error_type,
+            "status_code": status_code,
+            "detail": _bounded_rollout_error_detail(detail),
+        },
+    }
 
 
 class SharedRolloutCollectionConfig(BaseNeMoGymCLIConfig):
@@ -212,6 +259,15 @@ class RolloutCollectionConfig(SharedRolloutCollectionConfig):
     resume_from_cache: bool = Field(
         default=False,
         description="If the same command is run multiple times, check the materialized inputs and current outputs and remove the inputs that have already been run",
+    )
+    rollout_failure_policy: Literal["fail_fast", "score_zero"] = Field(
+        default="fail_fast",
+        description=(
+            "How to handle an individual agent /run HTTP 500 or an agent-returned "
+            "failure record. fail_fast preserves the default exception/sidecar "
+            "behavior. score_zero persists the attempt in the main output with "
+            "reward 0 so collection continues and resume does not retry it."
+        ),
     )
     prompt_config: Optional[str] = Field(
         default=None,
@@ -534,7 +590,11 @@ class RolloutCollectionHelper(BaseModel):
         counts_left = Counter(r[AGENT_REF_KEY_NAME]["name"] for r in input_rows)
         results_file = output_fpath.open("ab")
         failures_file = failures_fpath.open("ab")
-        for future in self.run_examples(input_rows, semaphore=semaphore):
+        for future in self.run_examples(
+            input_rows,
+            semaphore=semaphore,
+            failure_policy=config.rollout_failure_policy,
+        ):
             row, result = await future
 
             result[TASK_INDEX_KEY_NAME] = row[TASK_INDEX_KEY_NAME]
@@ -552,6 +612,16 @@ class RolloutCollectionHelper(BaseModel):
 
             no_persist = bool(result.get(NG_NO_PERSIST_KEY))
             failure_class = result.get(NG_FAILURE_CLASS_KEY)
+            if config.rollout_failure_policy == "score_zero" and failure_class is not None and not no_persist:
+                result["reward"] = 0.0
+                result[NG_ROLLOUT_ERROR_KEY] = {
+                    "type": str(failure_class),
+                    "status_code": None,
+                    "detail": _bounded_rollout_error_detail(result.pop(NG_FAILURE_DETAIL_KEY, None)),
+                }
+                result.pop(NG_FAILURE_CLASS_KEY, None)
+                result.pop(NG_TERMINAL_KEY, None)
+                failure_class = None
 
             rows.append(row)
             results.append(result)
@@ -719,6 +789,7 @@ Aggregate metrics: {aggregate_metrics_fpath}""")
         examples: List[Dict],
         head_server_config: Optional[BaseServerConfig] = None,
         semaphore: Optional[Semaphore] = None,
+        failure_policy: Literal["fail_fast", "score_zero"] = "fail_fast",
     ) -> Iterator[Future]:  # pragma: no cover
         """
         We provide this function as a lower level interface for running rollout collection.
@@ -729,6 +800,23 @@ Aggregate metrics: {aggregate_metrics_fpath}""")
         async def _post_subroutine(row: Dict) -> Tuple[Dict, Dict]:
             async with semaphore:
                 res = await server_client.post(server_name=row["agent_ref"]["name"], url_path="/run", json=row)
+                if failure_policy == "score_zero" and getattr(res, "status", None) == 500:
+                    try:
+                        detail = await get_response_json(res)
+                    except Exception as error:
+                        detail = f"Could not decode HTTP 500 response: {type(error).__name__}: {error}"
+                    summary = _rollout_request_debug_summary(row)
+                    print(
+                        "[rollout_collection] scoring /run HTTP 500 as reward=0 "
+                        f"row={json.dumps(summary, sort_keys=True)}",
+                        flush=True,
+                    )
+                    return row, _zero_scored_rollout_result(
+                        row,
+                        error_type="http_500",
+                        status_code=500,
+                        detail=detail,
+                    )
                 try:
                     await raise_for_status(res)
                 except Exception:

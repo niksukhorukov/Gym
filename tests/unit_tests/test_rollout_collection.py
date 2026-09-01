@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import asyncio
 import json
 from asyncio import Future
 from collections import Counter
@@ -31,7 +32,9 @@ from nemo_gym.reward_profile import compute_aggregate_metrics
 from nemo_gym.rollout_collection import (
     _DEFAULT_MAX_ROLLOUT_ATTEMPTS,
     NG_FAILURE_CLASS_KEY,
+    NG_FAILURE_DETAIL_KEY,
     NG_NO_PERSIST_KEY,
+    NG_ROLLOUT_ERROR_KEY,
     RolloutAggregationConfig,
     RolloutAggregationHelper,
     RolloutCollectionConfig,
@@ -147,6 +150,66 @@ class TestRolloutCollection:
             assert "do not log this" not in captured.out
         else:
             assert "[rollout_collection] /run failed" not in captured.out
+
+    async def test_run_examples_can_score_http_500_as_zero(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        failed_row = {
+            AGENT_REF_KEY_NAME: {"name": "my_agent"},
+            TASK_INDEX_KEY_NAME: 7,
+            ROLLOUT_INDEX_KEY_NAME: 2,
+            "responses_create_params": {"input": "private prompt"},
+        }
+        successful_row = {
+            AGENT_REF_KEY_NAME: {"name": "my_agent"},
+            TASK_INDEX_KEY_NAME: 8,
+            ROLLOUT_INDEX_KEY_NAME: 0,
+            "responses_create_params": {"input": "another prompt"},
+        }
+        failed_response = MagicMock()
+        failed_response.status = 500
+        failed_response.read = AsyncMock(return_value=orjson.dumps("GraphRecursionError('limit reached')"))
+        successful_response = MagicMock()
+        successful_response.status = 200
+        successful_response.ok = True
+        successful_response.read = AsyncMock(return_value=orjson.dumps({"reward": 1.0, "response": {"output": []}}))
+
+        mock_server_client = MagicMock()
+
+        async def post(*_args, json, **_kwargs):
+            if json[TASK_INDEX_KEY_NAME] == 7:
+                return failed_response
+            return successful_response
+
+        mock_server_client.post = AsyncMock(side_effect=post)
+
+        class MockHelper(RolloutCollectionHelper):
+            def setup_server_client(self, *args, **kwargs):
+                return mock_server_client
+
+        completed = await asyncio.gather(
+            *MockHelper().run_examples([failed_row, successful_row], failure_policy="score_zero")
+        )
+        by_task = {row[TASK_INDEX_KEY_NAME]: (row, result) for row, result in completed}
+        actual_row, result = by_task[7]
+
+        assert actual_row is failed_row
+        assert result["reward"] == 0.0
+        assert result["responses_create_params"] == failed_row["responses_create_params"]
+        assert result["response"]["output"] == []
+        assert result[NG_ROLLOUT_ERROR_KEY] == {
+            "type": "http_500",
+            "status_code": 500,
+            "detail": "GraphRecursionError('limit reached')",
+        }
+        assert by_task[8] == (
+            successful_row,
+            {"reward": 1.0, "response": {"output": []}},
+        )
+        captured = capsys.readouterr()
+        assert "scoring /run HTTP 500 as reward=0" in captured.out
+        assert "private prompt" not in captured.out
 
     def test_preprocess_rows_with_prompt_config(self, tmp_path: Path) -> None:
         """prompt_config builds responses_create_params.input from template."""
@@ -858,6 +921,76 @@ class TestRolloutCollection:
             actual_failure_results = [json.loads(line) for line in f]
         assert [result["case"] for result in actual_failure_results] == ["case-1"]
         assert actual_failure_results[0][NG_FAILURE_CLASS_KEY] == "verify_failed"
+
+    async def test_score_zero_persists_agent_failures_and_resume_skips_them(
+        self, tmp_path: Path, empty_global_config: MagicMock
+    ) -> None:
+        input_jsonl_fpath = tmp_path / "input.jsonl"
+        samples = [
+            json.dumps(
+                {
+                    "responses_create_params": {"input": []},
+                    "agent_ref": {"name": "my agent name"},
+                    "x": index,
+                }
+            )
+            for index in range(2)
+        ]
+        input_jsonl_fpath.write_text("\n".join(samples) + "\n")
+        output_jsonl_fpath = tmp_path / "output.jsonl"
+        config = RolloutCollectionConfig(
+            input_jsonl_fpath=str(input_jsonl_fpath),
+            output_jsonl_fpath=str(output_jsonl_fpath),
+            rollout_failure_policy="score_zero",
+        )
+        captured: dict[str, list[dict]] = {}
+
+        class Helper(RolloutCollectionHelper):
+            def run_examples(self, examples: list[dict], *args, **kwargs):
+                assert kwargs["failure_policy"] == "score_zero"
+                futures = []
+                for example in examples:
+                    future = Future()
+                    result = {"case": f"case-{example['x']}", "reward": 1.0}
+                    if example["x"] == 1:
+                        result.update(
+                            {
+                                "reward": 0.0,
+                                NG_FAILURE_CLASS_KEY: "decomposer_recursion_limit",
+                                NG_FAILURE_DETAIL_KEY: "manager graph exceeded its limit",
+                            }
+                        )
+                    future.set_result((example, result))
+                    futures.append(future)
+                return futures
+
+            async def _call_aggregate_metrics(self, results, rows, output_fpath):
+                captured["results"] = results
+                captured["rows"] = rows
+                metrics_fpath = output_fpath.with_stem(output_fpath.stem + "_aggregate_metrics").with_suffix(".json")
+                metrics_fpath.write_text("[]")
+                return metrics_fpath
+
+        helper = Helper()
+        await helper.run_from_config(config)
+
+        written = [json.loads(line) for line in output_jsonl_fpath.read_text().splitlines() if line]
+        assert [result["case"] for result in written] == ["case-0", "case-1"]
+        assert written[1]["reward"] == 0.0
+        assert written[1][NG_ROLLOUT_ERROR_KEY] == {
+            "type": "decomposer_recursion_limit",
+            "status_code": None,
+            "detail": "manager graph exceeded its limit",
+        }
+        assert NG_FAILURE_CLASS_KEY not in written[1]
+        assert [result["case"] for result in captured["results"]] == [
+            "case-0",
+            "case-1",
+        ]
+        assert _failures_path_for(output_jsonl_fpath).read_text() == ""
+
+        remaining, *_ = helper._load_from_cache(config)
+        assert remaining == []
 
     async def test_run_from_config_aggregate_metrics_includes_cached_persisted_rows(
         self, tmp_path: Path, empty_global_config: MagicMock
