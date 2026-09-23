@@ -3,12 +3,12 @@
 ## Workplace Assistant
 
 The Workplace config uses DeepSeek V4 Flash 0731 through OpenRouter as the
-Decomposer and Gemma-4-26B-A4B with thinking disabled as the subagent type. Set
+Decomposer and Qwen3.5-4B with thinking disabled as the subagent type. Set
 `policy_api_key` in `external/Gym/env.yaml` to an OpenRouter API key. From the
 project root, serve the subagent model:
 
 ```bash
-scripts/vllm/serve_gemma_4_26b_a4b.sh
+scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
 Start the subagent server:

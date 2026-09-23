@@ -40,10 +40,10 @@ from nemo_gym.server_utils import get_response_json, raise_for_status
 MISSING_FINAL_ASSISTANT_FAILURE_CLASS = "decomposer_missing_final_assistant_message"
 MISSING_FINAL_ASSISTANT_MESSAGE = "Decomposer response did not contain a final assistant message."
 UNCOLLECTED_SUBAGENTS_FAILURE_CLASS = "decomposer_uncollected_subagents"
-UNCOLLECTED_SUBAGENTS_MESSAGE = "Decomposer finalized before collecting all subagent reports"
+UNCOLLECTED_SUBAGENTS_MESSAGE = "Decomposer finalized before collecting all subagent responses"
 NG_FAILURE_CLASS_KEY = "_ng_failure_class"
 NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
-TERMINAL_SUBAGENT_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
+TERMINAL_SUBAGENT_STATUSES = frozenset({"responded", "error", "timeout", "interrupted"})
 
 
 class DecomposerRolloutValidationError(RuntimeError):
@@ -65,7 +65,7 @@ class MissingFinalAssistantMessageError(DecomposerRolloutValidationError):
 
 
 class UncollectedSubagentsError(DecomposerRolloutValidationError):
-    """The Decomposer answered before every spawned subagent report was collected."""
+    """The Decomposer answered before every subagent run response was collected."""
 
     def __init__(self, details: str):
         super().__init__(
@@ -81,7 +81,7 @@ class ChatNeMoGym(BaseChatModel):
     How it works:
     - `create_decomposer_agent` passes this model to LangChain's `create_agent`.
     - `create_agent` owns the agent loop. On every model step, it calls
-      `bind_tools()` with `spawn_subagent` and `wait` tools and then calls
+      `bind_tools()` with `new`, `fork`, `run`, and `wait` tools and then calls
       `ainvoke()`.
     - `bind_tools()` converts LangChain/OpenAI tool schemas to Gym Responses API
       function-tool schemas and stores them as bound kwargs.
@@ -596,15 +596,15 @@ def _collect_subagent_tool_calls(
 ) -> list[NeMoGymResponseFunctionToolCall]:
     subagent_runs = final_state.get("subagent_runs") or {}
     function_calls: list[NeMoGymResponseFunctionToolCall] = []
-    reported_subagent_runs = sorted(
+    subagent_runs_in_response_order = sorted(
         (
             subagent_run
             for subagent_run in subagent_runs.values()
-            if subagent_run.get("report_sequence_number") is not None
+            if subagent_run.get("response_sequence_number") is not None
         ),
-        key=lambda subagent_run: subagent_run["report_sequence_number"],
+        key=lambda subagent_run: subagent_run["response_sequence_number"],
     )
-    for subagent_run in reported_subagent_runs:
+    for subagent_run in subagent_runs_in_response_order:
         subagent_run_id = subagent_run["subagent_run_id"]
         for tool_call in subagent_run.get("tool_calls") or []:
             function_calls.append(
@@ -644,27 +644,19 @@ def _validate_decomposer_rollout(
     invalid_runs: list[str] = []
     for subagent_run_id, subagent_run in (final_state.get("subagent_runs") or {}).items():
         status = _item_get(subagent_run, "status")
-        report = _item_get(subagent_run, "report")
-        report_sequence_number = _item_get(
+        response_sequence_number = _item_get(
             subagent_run,
-            "report_sequence_number",
+            "response_sequence_number",
         )
         reasons = []
         if status not in TERMINAL_SUBAGENT_STATUSES:
             reasons.append(f"non-terminal status {status!r}")
-        if report is None:
-            reasons.append("missing report")
-        else:
-            if _item_get(report, "subagent_run_id") != subagent_run_id:
-                reasons.append("report run ID does not match")
-            if _item_get(report, "status") != status:
-                reasons.append("report status does not match")
         if (
-            isinstance(report_sequence_number, bool)
-            or not isinstance(report_sequence_number, int)
-            or report_sequence_number < 0
+            isinstance(response_sequence_number, bool)
+            or not isinstance(response_sequence_number, int)
+            or response_sequence_number < 0
         ):
-            reasons.append("missing or invalid report sequence number")
+            reasons.append("missing or invalid response sequence number")
         if reasons:
             invalid_runs.append(f"`{subagent_run_id}` ({'; '.join(reasons)})")
 
