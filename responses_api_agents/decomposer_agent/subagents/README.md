@@ -1,8 +1,7 @@
 # Decomposer subagent server
 
-This lightweight LangGraph server exposes the eight assistants registered in
-`langgraph.json`. Each assistant is compiled in `graph.py` as a LangChain
-agent that receives one delegated task and returns a self-contained report.
+This lightweight LangGraph server exposes the assistants registered in
+`langgraph.json` and compiled in `graph.py`.
 
 Tools are supplied per run through LangGraph runtime context. The shared
 `NeMoGymSubagentMiddleware` converts Gym Responses API function schemas to Chat
@@ -12,29 +11,20 @@ function tools retain the previous tool-free behavior.
 
 | Assistant ID | Model | Endpoint | Thinking |
 | --- | --- | --- | --- |
-| `gemma_4_2b_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Enabled |
-| `gemma_4_2b_non_thinking` | `google/gemma-4-E2B-it` | `http://127.0.0.1:8020/v1` | Disabled |
-| `gemma_4_4b_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Enabled |
-| `gemma_4_4b_non_thinking` | `google/gemma-4-E4B-it` | `http://127.0.0.1:8021/v1` | Disabled |
-| `gemma_4_12b_thinking` | `google/gemma-4-12B-it` | `http://127.0.0.1:8022/v1` | Enabled |
-| `gemma_4_12b_non_thinking` | `google/gemma-4-12B-it` | `http://127.0.0.1:8022/v1` | Disabled |
-| `gemma_4_26b_a4b_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8023/v1` | Enabled |
-| `gemma_4_26b_a4b_non_thinking` | `google/gemma-4-26B-A4B-it` | `http://127.0.0.1:8023/v1` | Disabled |
+| `qwen_3_5_4b_non_thinking` | `Qwen/Qwen3.5-4B` | `http://127.0.0.1:8024/v1` | Disabled |
 
-Thinking assistants request and preserve reasoning output. Where supported,
-non-thinking assistants explicitly disable it. No explicit thinking-token
-budget is set.
+Thinking and reasoning output are disabled. No explicit
+completion limit is set, so vLLM uses the model context remaining after the
+prompt. It uses a 300-second request timeout, no retries, disabled streaming,
+and the Chat Completions API.
 
-The assistants do not set an explicit completion limit, so vLLM uses the model
-context remaining after the prompt. All eight use a 300-second request timeout,
-no retries, disabled streaming, and the Chat Completions API. Their sampling
-parameters are:
+Its sampling parameters are:
 
 | Model mode | Temperature | `top_p` | `top_k` | Other parameters |
 | --- | ---: | ---: | ---: | --- |
-| Gemma thinking and non-thinking | 1.0 | 0.95 | 64 | — |
+| Qwen3.5-4B non-thinking | 0.7 | 0.8 | 20 | `presence_penalty=1.5`, `min_p=0.0`, `repetition_penalty=1.0` |
 
-Start the required local vLLM servers, then run:
+Start the local vLLM server with `scripts/vllm/serve_qwen_3_5_4b.sh`, then run:
 
 ```bash
 external/Gym/responses_api_agents/decomposer_agent/subagents/serve.sh

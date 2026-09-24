@@ -3,10 +3,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from decomposer.prompts import (
-    DECOMPOSER_SYSTEM_PROMPT,
-    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-)
+from decomposer.prompt_profiles import DECOMPOSER_STUDENT_SYSTEM_PROMPT
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 from fastapi import Response
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
@@ -17,7 +15,6 @@ from responses_api_agents.decomposer_agent.app import (
     MISSING_FINAL_ASSISTANT_FAILURE_CLASS,
     NG_FAILURE_CLASS_KEY,
     NG_FAILURE_DETAIL_KEY,
-    TERMINAL_SUBAGENT_STATUSES,
     UNCOLLECTED_SUBAGENTS_FAILURE_CLASS,
     ChatNeMoGym,
     DecomposerAgent,
@@ -100,19 +97,19 @@ def test_request_with_body_adds_body_to_model_settings():
     assert updated_request.model_settings["nemo_gym_body"] == body
 
 
-def test_collect_subagent_tool_calls_preserves_all_calls_in_report_order():
+def test_collect_subagent_tool_calls_preserves_all_calls_in_response_order():
     final_state = {
         "subagent_runs": {
             "run_a": {
                 "subagent_run_id": "run_a",
-                "report_sequence_number": 1,
+                "response_sequence_number": 1,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "a"}},
                 ],
             },
             "run_b": {
                 "subagent_run_id": "run_b",
-                "report_sequence_number": 0,
+                "response_sequence_number": 0,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "b1"}},
                     {"id": "call_2", "name": "not_allowed", "args": {"value": "b2"}},
@@ -158,8 +155,8 @@ def test_subagent_tool_calls_and_final_message():
     response_data["output"] = [
         {
             "type": "function_call",
-            "name": "spawn_subagent",
-            "call_id": "spawn_1",
+            "name": "new",
+            "call_id": "create_1",
             "arguments": "{}",
             "status": "completed",
         },
@@ -251,26 +248,20 @@ def test_validate_decomposer_rollout_classifies_manager_call_limit():
         )
 
 
-@pytest.mark.parametrize("status", sorted(TERMINAL_SUBAGENT_STATUSES))
-def test_validate_decomposer_rollout_accepts_collected_terminal_reports(status):
+@pytest.mark.parametrize("status", ["responded", "error", "timeout", "interrupted"])
+def test_validate_decomposer_rollout_accepts_collected_terminal_responses(status):
     final_state = _final_state()
     final_state["subagent_runs"]["run_a"] |= {
         "status": status,
-        "report": {
-            "subagent_run_id": "run_a",
-            "status": status,
-            "content": "result",
-        },
+        "response": "result" if status == "responded" else None,
+        "error": "failure" if status == "error" else None,
     }
     final_state["subagent_runs"]["run_b"] = {
         "subagent_run_id": "run_b",
-        "status": "success",
-        "report": {
-            "subagent_run_id": "run_b",
-            "status": "success",
-            "content": "another result",
-        },
-        "report_sequence_number": 1,
+        "status": "responded",
+        "response": "another result",
+        "error": None,
+        "response_sequence_number": 1,
         "tool_calls": [],
     }
 
@@ -285,12 +276,11 @@ def test_validate_decomposer_rollout_rejects_any_uncollected_run():
     final_state["subagent_runs"]["run_b"] = {
         "subagent_run_id": "run_b",
         "status": "in_progress",
-        "report": None,
     }
 
     with pytest.raises(
         UncollectedSubagentsError,
-        match=r"`run_b` .*non-terminal status 'in_progress'.*missing report",
+        match=r"`run_b` .*non-terminal status 'in_progress'.*missing or invalid response sequence number",
     ):
         _validate_decomposer_rollout(
             NeMoGymResponse.model_validate(_model_response()),
@@ -298,17 +288,14 @@ def test_validate_decomposer_rollout_rejects_any_uncollected_run():
         )
 
 
-def test_validate_decomposer_rollout_rejects_inconsistent_report():
+@pytest.mark.parametrize("sequence_number", [None, -1, True, "0"])
+def test_validate_decomposer_rollout_rejects_invalid_response_sequence_number(sequence_number):
     final_state = _final_state()
-    final_state["subagent_runs"]["run_a"]["report"] = {
-        "subagent_run_id": "another_run",
-        "status": "error",
-        "content": "wrong report",
-    }
+    final_state["subagent_runs"]["run_a"]["response_sequence_number"] = sequence_number
 
     with pytest.raises(
         UncollectedSubagentsError,
-        match="report run ID does not match.*report status does not match",
+        match="missing or invalid response sequence number",
     ):
         _validate_decomposer_rollout(
             NeMoGymResponse.model_validate(_model_response()),
@@ -348,7 +335,7 @@ def test_factories_can_be_imported_from_config():
     config = DecomposerAgentConfig.model_validate(
         config_data
         | {
-            "decomposer_system_prompt_profile": "teacher",
+            "decomposer_system_prompt_profile": "student",
             "few_shot_message_factories": ["builtins:list"],
             "response_for_verifier_factory": (
                 "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
@@ -356,10 +343,10 @@ def test_factories_can_be_imported_from_config():
         }
     )
 
-    assert default_config.decomposer_system_prompt_profile == "student"
+    assert default_config.decomposer_system_prompt_profile == "teacher"
     assert default_config.manager_max_model_calls == 100
     assert default_config.subagent_recursion_limit == 1000
-    assert config.decomposer_system_prompt_profile == "teacher"
+    assert config.decomposer_system_prompt_profile == "student"
     assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
     assert config.few_shot_message_factories == [list]
@@ -372,10 +359,16 @@ def test_factories_can_be_imported_from_config():
 @pytest.mark.parametrize(
     ("profile", "expected_prompt"),
     [
-        ("student", DECOMPOSER_SYSTEM_PROMPT),
-        ("teacher", DECOMPOSER_TEACHER_SYSTEM_PROMPT),
+        ("student", DECOMPOSER_STUDENT_SYSTEM_PROMPT),
+        ("teacher", DECOMPOSER_SYSTEM_PROMPT),
     ],
 )
+class _PromptRequest:
+    def override(self, **overrides):
+        self.overrides = overrides
+        return self
+
+
 def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_prompt):
     captured = {}
     graph = object()
@@ -397,7 +390,11 @@ def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_p
     )
 
     assert _create_decomposer_graph(_FakeServerClient(), config) is graph
-    assert captured["decomposer_system_prompt"] == expected_prompt
+    # The core builds the agent with its own prompt; the profile swaps it per model call.
+    assert "decomposer_system_prompt" not in captured
+    request = _PromptRequest()
+    assert captured["middleware"][0].wrap_model_call(request, lambda value: value) is request
+    assert request.overrides["system_message"].content == expected_prompt
     assert captured["subagent_recursion_limit"] == 1000
     limiter = next(
         item
@@ -419,8 +416,8 @@ def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_s
     response_data["output"] = [
         {
             "type": "function_call",
-            "name": "spawn_subagent",
-            "call_id": "spawn_1",
+            "name": "new",
+            "call_id": "create_1",
             "arguments": "{}",
             "status": "completed",
         },
@@ -453,8 +450,8 @@ def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_s
     assert [tool["name"] for tool in verifier_response["tools"]] == ["outer_tool"]
 
     assert [item.type for item in result.response.output] == ["function_call", "message"]
-    assert result.response.output[0].name == "spawn_subagent"
-    assert [tool.name for tool in result.response.tools] == ["spawn_subagent"]
+    assert result.response.output[0].name == "new"
+    assert [tool.name for tool in result.response.tools] == ["new"]
     result_data = result.model_dump(mode="json")
     assert "final_state" not in result_data["response"]
     assert result_data["final_state"] == _final_state()
@@ -546,7 +543,6 @@ def test_run_routes_uncollected_subagents_to_retryable_failure():
     response_data["final_state"]["subagent_runs"]["run_b"] = {
         "subagent_run_id": "run_b",
         "status": "in_progress",
-        "report": None,
     }
     server_client = _FakeRunServerClient(response_data)
     agent = DecomposerAgent.model_construct(
@@ -778,13 +774,10 @@ def _final_state():
         "subagent_runs": {
             "run_a": {
                 "subagent_run_id": "run_a",
-                "status": "success",
-                "report": {
-                    "subagent_run_id": "run_a",
-                    "status": "success",
-                    "content": "subagent result",
-                },
-                "report_sequence_number": 0,
+                "status": "responded",
+                "response": "subagent result",
+                "error": None,
+                "response_sequence_number": 0,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "a"}},
                 ],
@@ -848,8 +841,8 @@ def _outer_tool():
 def _decomposer_tool():
     return {
         "type": "function",
-        "name": "spawn_subagent",
-        "description": "Spawn a subagent.",
+        "name": "new",
+        "description": "Create a subagent.",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         "strict": False,
     }
