@@ -356,6 +356,12 @@ def test_factories_can_be_imported_from_config():
         DecomposerAgentConfig.model_validate(config_data | {"decomposer_system_prompt_profile": "unknown"})
 
 
+class _PromptRequest:
+    def override(self, **overrides):
+        self.overrides = overrides
+        return self
+
+
 @pytest.mark.parametrize(
     ("profile", "expected_prompt"),
     [
@@ -363,12 +369,6 @@ def test_factories_can_be_imported_from_config():
         ("teacher", DECOMPOSER_SYSTEM_PROMPT),
     ],
 )
-class _PromptRequest:
-    def override(self, **overrides):
-        self.overrides = overrides
-        return self
-
-
 def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_prompt):
     captured = {}
     graph = object()
