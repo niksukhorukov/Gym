@@ -99,16 +99,16 @@ def test_request_with_body_adds_body_to_model_settings():
 
 def test_collect_subagent_tool_calls_preserves_all_calls_in_response_order():
     final_state = {
-        "subagent_runs": {
+        "agent_runs": {
             "run_a": {
-                "subagent_run_id": "run_a",
+                "agent_run_id": "run_a",
                 "response_sequence_number": 1,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "a"}},
                 ],
             },
             "run_b": {
-                "subagent_run_id": "run_b",
+                "agent_run_id": "run_b",
                 "response_sequence_number": 0,
                 "tool_calls": [
                     {"id": "call_1", "name": "outer_tool", "args": {"value": "b1"}},
@@ -143,7 +143,7 @@ def test_default_response_for_verifier_factory_returns_nemo_gym_response():
     assert (
         _default_response_for_verifier_factory(
             nemo_gym_response,
-            {"messages": [], "subagent_runs": {}},
+            {"messages": [], "agent_runs": {}},
             _body(),
         )
         is nemo_gym_response
@@ -251,13 +251,13 @@ def test_validate_decomposer_rollout_classifies_manager_call_limit():
 @pytest.mark.parametrize("status", ["responded", "error", "timeout", "interrupted"])
 def test_validate_decomposer_rollout_accepts_collected_terminal_responses(status):
     final_state = _final_state()
-    final_state["subagent_runs"]["run_a"] |= {
+    final_state["agent_runs"]["run_a"] |= {
         "status": status,
         "response": "result" if status == "responded" else None,
         "error": "failure" if status == "error" else None,
     }
-    final_state["subagent_runs"]["run_b"] = {
-        "subagent_run_id": "run_b",
+    final_state["agent_runs"]["run_b"] = {
+        "agent_run_id": "run_b",
         "status": "responded",
         "response": "another result",
         "error": None,
@@ -273,8 +273,8 @@ def test_validate_decomposer_rollout_accepts_collected_terminal_responses(status
 
 def test_validate_decomposer_rollout_rejects_any_uncollected_run():
     final_state = _final_state()
-    final_state["subagent_runs"]["run_b"] = {
-        "subagent_run_id": "run_b",
+    final_state["agent_runs"]["run_b"] = {
+        "agent_run_id": "run_b",
         "status": "in_progress",
     }
 
@@ -291,7 +291,7 @@ def test_validate_decomposer_rollout_rejects_any_uncollected_run():
 @pytest.mark.parametrize("sequence_number", [None, -1, True, "0"])
 def test_validate_decomposer_rollout_rejects_invalid_response_sequence_number(sequence_number):
     final_state = _final_state()
-    final_state["subagent_runs"]["run_a"]["response_sequence_number"] = sequence_number
+    final_state["agent_runs"]["run_a"]["response_sequence_number"] = sequence_number
 
     with pytest.raises(
         UncollectedSubagentsError,
@@ -309,7 +309,7 @@ def test_decomposer_agent_response_serializes_final_state():
         | {
             "final_state": {
                 "messages": [HumanMessage(content="question")],
-                "subagent_runs": {},
+                "agent_runs": {},
             }
         }
     )
@@ -318,7 +318,7 @@ def test_decomposer_agent_response_serializes_final_state():
 
     assert final_state["messages"][0]["type"] == "human"
     assert final_state["messages"][0]["content"] == "question"
-    assert final_state["subagent_runs"] == {}
+    assert final_state["agent_runs"] == {}
 
 
 def test_factories_can_be_imported_from_config():
@@ -395,7 +395,7 @@ def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_p
     request = _PromptRequest()
     assert captured["middleware"][0].wrap_model_call(request, lambda value: value) is request
     assert request.overrides["system_message"].content == expected_prompt
-    assert captured["subagent_recursion_limit"] == 1000
+    assert captured["agent_recursion_limit"] == 1000
     limiter = next(
         item
         for item in captured["middleware"]
@@ -485,6 +485,7 @@ def test_run_routes_missing_final_message_to_retryable_failure():
         )
     )
     result_data = result.model_dump(mode="json")
+    assert result_data["final_state"] == response_data["final_state"]
 
     assert server_client.verify_request is None
     assert result.reward == 0.0
@@ -523,6 +524,7 @@ def test_run_routes_manager_call_limit_to_failed_rollout_without_verifier():
         )
     )
     result_data = result.model_dump(mode="json")
+    assert result_data["final_state"] == response_data["final_state"]
 
     assert server_client.verify_request is None
     assert result.reward == 0.0
@@ -540,8 +542,8 @@ def test_run_routes_uncollected_subagents_to_retryable_failure():
 
     response_data = _model_response()
     response_data["final_state"] = _final_state()
-    response_data["final_state"]["subagent_runs"]["run_b"] = {
-        "subagent_run_id": "run_b",
+    response_data["final_state"]["agent_runs"]["run_b"] = {
+        "agent_run_id": "run_b",
         "status": "in_progress",
     }
     server_client = _FakeRunServerClient(response_data)
@@ -561,6 +563,7 @@ def test_run_routes_uncollected_subagents_to_retryable_failure():
         )
     )
     result_data = result.model_dump(mode="json")
+    assert result_data["final_state"] == response_data["final_state"]
 
     assert factory_called is False
     assert server_client.verify_request is None
@@ -771,9 +774,9 @@ def _final_state():
                 "tool_calls": [],
             }
         ],
-        "subagent_runs": {
+        "agent_runs": {
             "run_a": {
-                "subagent_run_id": "run_a",
+                "agent_run_id": "run_a",
                 "status": "responded",
                 "response": "subagent result",
                 "error": None,

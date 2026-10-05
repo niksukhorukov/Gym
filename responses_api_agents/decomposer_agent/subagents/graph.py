@@ -3,8 +3,8 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from decomposer.models import ChatVLLM
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -175,5 +175,5 @@ def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
                 exit_behavior="error",
             ),
         ],
-        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        system_prompt=AGENT_SYSTEM_PROMPT,
     )

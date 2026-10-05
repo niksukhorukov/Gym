@@ -2,7 +2,7 @@ import json
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict
 
-from decomposer.core import SubagentType, create_decomposer_agent
+from decomposer.core import AgentType, create_decomposer_agent
 from decomposer.prompt_profiles import (
     DecomposerPromptProfile,
     resolve_decomposer_system_prompt,
@@ -311,7 +311,7 @@ def _subagent_tool_calls_and_final_message(
 class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     resources_server: ResourcesServerRef
     model_server: ModelServerRef
-    subagent_types: Sequence[SubagentType]
+    subagent_types: Sequence[AgentType]
     few_shot_message_factories: Sequence[ImportString[Callable[[], Sequence[dict[str, Any]]]]] = ()
     join_gym_system_and_user_prompts: bool = False
     decomposer_system_prompt_profile: DecomposerPromptProfile = "teacher"
@@ -356,7 +356,7 @@ def _create_decomposer_graph(
             server_client=server_client,
             model_server_name=config.model_server.name,
         ),
-        subagent_types=config.subagent_types,
+        agent_types=config.subagent_types,
         middleware=[
             system_prompt_middleware(
                 resolve_decomposer_system_prompt(config.decomposer_system_prompt_profile)
@@ -368,7 +368,7 @@ def _create_decomposer_graph(
             ),
         ],
         context_schema=NeMoGymContext,
-        subagent_recursion_limit=config.subagent_recursion_limit,
+        agent_recursion_limit=config.subagent_recursion_limit,
     )
 
 
@@ -488,6 +488,7 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
                 | {
                     "response": nemo_gym_response.model_dump(mode="json"),
                     "reward": 0.0,
+                    "final_state": decomposer_agent_response.final_state,
                     NG_FAILURE_CLASS_KEY: e.failure_class,
                     NG_FAILURE_DETAIL_KEY: str(e),
                 }
@@ -626,7 +627,7 @@ def _request_with_body(request: ModelRequest) -> ModelRequest:
 def _collect_subagent_tool_calls(
     final_state: dict[str, Any],
 ) -> list[NeMoGymResponseFunctionToolCall]:
-    subagent_runs = final_state.get("subagent_runs") or {}
+    subagent_runs = final_state.get("agent_runs") or {}
     function_calls: list[NeMoGymResponseFunctionToolCall] = []
     subagent_runs_in_response_order = sorted(
         (
@@ -637,7 +638,7 @@ def _collect_subagent_tool_calls(
         key=lambda subagent_run: subagent_run["response_sequence_number"],
     )
     for subagent_run in subagent_runs_in_response_order:
-        subagent_run_id = subagent_run["subagent_run_id"]
+        subagent_run_id = subagent_run["agent_run_id"]
         for tool_call in subagent_run.get("tool_calls") or []:
             function_calls.append(
                 NeMoGymResponseFunctionToolCall(
@@ -676,7 +677,7 @@ def _validate_decomposer_rollout(
         raise MissingFinalAssistantMessageError()
 
     invalid_runs: list[str] = []
-    for subagent_run_id, subagent_run in (final_state.get("subagent_runs") or {}).items():
+    for subagent_run_id, subagent_run in (final_state.get("agent_runs") or {}).items():
         status = _item_get(subagent_run, "status")
         response_sequence_number = _item_get(
             subagent_run,
