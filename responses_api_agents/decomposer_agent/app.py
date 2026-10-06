@@ -4,11 +4,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict
 
 from decomposer.core import AgentType, create_decomposer_agent
-from decomposer.prompt_profiles import (
-    DecomposerPromptProfile,
-    resolve_decomposer_system_prompt,
-    system_prompt_middleware,
-)
 from fastapi import Body, Request, Response
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -318,7 +313,6 @@ class DecomposerAgentConfig(BaseResponsesAPIAgentConfig):
     subagent_types: Sequence[AgentType]
     few_shot_message_factories: Sequence[ImportString[Callable[[], Sequence[dict[str, Any]]]]] = ()
     join_gym_system_and_user_prompts: bool = False
-    decomposer_system_prompt_profile: DecomposerPromptProfile = "teacher"
     manager_max_model_calls: int = Field(default=100, ge=1)
     subagent_recursion_limit: int = Field(default=1000, ge=1)
     response_for_verifier_factory: ImportString[
@@ -362,9 +356,6 @@ def _create_decomposer_graph(
         ),
         agent_types=config.subagent_types,
         middleware=[
-            system_prompt_middleware(
-                resolve_decomposer_system_prompt(config.decomposer_system_prompt_profile)
-            ),
             NeMoGymDecomposerAgentMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=config.manager_max_model_calls,

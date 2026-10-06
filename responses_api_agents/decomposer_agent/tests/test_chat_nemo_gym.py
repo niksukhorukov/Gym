@@ -3,8 +3,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from decomposer.prompt_profiles import DECOMPOSER_STUDENT_SYSTEM_PROMPT
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 from fastapi import Response
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
@@ -336,7 +334,6 @@ def test_factories_can_be_imported_from_config():
     config = DecomposerAgentConfig.model_validate(
         config_data
         | {
-            "decomposer_system_prompt_profile": "student",
             "few_shot_message_factories": ["builtins:list"],
             "response_for_verifier_factory": (
                 "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
@@ -344,66 +341,13 @@ def test_factories_can_be_imported_from_config():
         }
     )
 
-    assert default_config.decomposer_system_prompt_profile == "teacher"
     assert default_config.manager_max_model_calls == 100
     assert default_config.subagent_recursion_limit == 1000
-    assert config.decomposer_system_prompt_profile == "student"
     assert default_config.few_shot_message_factories == ()
     assert default_config.response_for_verifier_factory is _default_response_for_verifier_factory
     assert config.few_shot_message_factories == [list]
     assert config.response_for_verifier_factory is _subagent_tool_calls_and_final_message
 
-    with pytest.raises(ValueError, match="decomposer_system_prompt_profile"):
-        DecomposerAgentConfig.model_validate(config_data | {"decomposer_system_prompt_profile": "unknown"})
-
-
-class _PromptRequest:
-    def override(self, **overrides):
-        self.overrides = overrides
-        return self
-
-
-@pytest.mark.parametrize(
-    ("profile", "expected_prompt"),
-    [
-        ("student", DECOMPOSER_STUDENT_SYSTEM_PROMPT),
-        ("teacher", DECOMPOSER_SYSTEM_PROMPT),
-    ],
-)
-def test_decomposer_prompt_profile_reaches_core(monkeypatch, profile, expected_prompt):
-    captured = {}
-    graph = object()
-
-    def fake_create_decomposer_agent(**kwargs):
-        captured.update(kwargs)
-        return graph
-
-    monkeypatch.setattr(
-        "responses_api_agents.decomposer_agent.app.create_decomposer_agent",
-        fake_create_decomposer_agent,
-    )
-    config = SimpleNamespace(
-        model_server=SimpleNamespace(name="model"),
-        subagent_types=[],
-        decomposer_system_prompt_profile=profile,
-        manager_max_model_calls=100,
-        subagent_recursion_limit=1000,
-    )
-
-    assert _create_decomposer_graph(_FakeServerClient(), config) is graph
-    # The core builds the agent with its own prompt; the profile swaps it per model call.
-    assert "decomposer_system_prompt" not in captured
-    request = _PromptRequest()
-    assert captured["middleware"][0].wrap_model_call(request, lambda value: value) is request
-    assert request.overrides["system_message"].content == expected_prompt
-    assert captured["agent_recursion_limit"] == 1000
-    limiter = next(
-        item
-        for item in captured["middleware"]
-        if isinstance(item, ModelCallLimitMiddleware)
-    )
-    assert limiter.run_limit == 100
-    assert limiter.exit_behavior == "end"
 
 
 def test_run_verifies_subagent_calls_and_returns_canonical_response_with_final_state():
