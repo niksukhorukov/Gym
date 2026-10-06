@@ -30,6 +30,7 @@ from responses_api_agents.decomposer_agent.app import (
     _default_response_for_verifier_factory,
     _input_to_messages,
     _messages_to_items,
+    _release_subagent_threads,
     _request_with_body,
     _subagent_tool_calls_and_final_message,
     _validate_decomposer_rollout,
@@ -640,6 +641,7 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
             resources_server=SimpleNamespace(name="resources"),
             few_shot_message_factories=(),
             join_gym_system_and_user_prompts=False,
+            subagent_types=(),
         ),
         graph=graph,
     )
@@ -665,6 +667,7 @@ def test_responses_prepends_configured_few_shot_messages():
             resources_server=SimpleNamespace(name="resources"),
             few_shot_message_factories=(lambda: few_shot_messages,),
             join_gym_system_and_user_prompts=False,
+            subagent_types=(),
         ),
         graph=graph,
     )
@@ -684,6 +687,89 @@ def test_responses_prepends_configured_few_shot_messages():
             HumanMessage(content="runtime prompt"),
         ]
     }
+
+
+def test_release_subagent_threads_cancels_active_runs_saves_uncollected_and_deletes(monkeypatch):
+    client = _FakeLangGraphClient(
+        {
+            "t1": [{"run_id": "r1", "status": "success"}],
+            # r2_lost finished, but its launch response never reached the manager.
+            "t2": [{"run_id": "r2", "status": "success"}, {"run_id": "r2_lost", "status": "success"}],
+            "t3": [{"run_id": "r4", "status": "running"}],
+        }
+    )
+    monkeypatch.setattr("responses_api_agents.decomposer_agent.app.get_client", client)
+
+    result = asyncio.run(_release_subagent_threads(_subagent_state("t1", "t2", "t3"), _subagent_types()))
+
+    assert ("cancel", "t3", "r4", True) in client.calls
+    assert [call[1] for call in client.calls if call[0] == "delete"] == ["t1", "t2", "t3"]
+    assert sorted(result["saved_threads"]) == ["t2", "t3"]
+    assert result["saved_threads"]["t3"] == {
+        "values": {"messages": ["t3 history"]},
+        "runs": [{"run_id": "r4", "status": "interrupted"}],
+    }
+    assert result["deleted_threads"] == 3
+    assert result["cancelled_runs"] == 1
+    assert result["errors"] == []
+    assert client.urls == ["http://subagents.test"] * 3
+
+
+def test_release_subagent_threads_records_errors_and_continues(monkeypatch):
+    client = _FakeLangGraphClient(
+        {
+            "t1": [{"run_id": "r1", "status": "running"}],
+            "t2": [{"run_id": "r2", "status": "success"}],
+            "t3": [{"run_id": "r3", "status": "success"}],
+        },
+        stuck={"t1"},
+        fail_delete={"t2"},
+    )
+    monkeypatch.setattr("responses_api_agents.decomposer_agent.app.get_client", client)
+
+    result = asyncio.run(_release_subagent_threads(_subagent_state("t1", "t2", "t3"), _subagent_types()))
+
+    assert [call[1] for call in client.calls if call[0] == "delete"] == ["t2", "t3"]
+    assert result["errors"] == [
+        "t1: RuntimeError: Subagent run still active after cancellation",
+        "t2: RuntimeError: delete failed",
+    ]
+    assert result["deleted_threads"] == 1
+
+
+def test_release_subagent_threads_without_agents_makes_no_calls(monkeypatch):
+    client = _FakeLangGraphClient({})
+    monkeypatch.setattr("responses_api_agents.decomposer_agent.app.get_client", client)
+
+    result = asyncio.run(_release_subagent_threads({"messages": []}, _subagent_types()))
+
+    assert client.urls == []
+    assert result == {"deleted_threads": 0, "cancelled_runs": 0, "saved_threads": {}, "errors": []}
+
+
+def test_responses_attaches_subagent_cleanup_to_final_state(monkeypatch):
+    client = _FakeLangGraphClient({"t1": [{"run_id": "r1", "status": "success"}]})
+    monkeypatch.setattr("responses_api_agents.decomposer_agent.app.get_client", client)
+    agent = _subagent_responses_agent(_FakeGraph(subagent_state=_subagent_state("t1")))
+
+    response = asyncio.run(agent.responses(SimpleNamespace(cookies={}), Response(), _body()))
+
+    assert response.final_state["subagent_cleanup"]["deleted_threads"] == 1
+    assert response.final_state["subagent_cleanup"]["errors"] == []
+
+
+def test_responses_releases_subagent_threads_when_graph_raises(monkeypatch):
+    client = _FakeLangGraphClient({"t1": [{"run_id": "r1", "status": "running"}]})
+    monkeypatch.setattr("responses_api_agents.decomposer_agent.app.get_client", client)
+    agent = _subagent_responses_agent(
+        _FakeGraph(subagent_state=_subagent_state("t1"), error=RuntimeError("manager model unavailable"))
+    )
+
+    with pytest.raises(RuntimeError, match="manager model unavailable"):
+        asyncio.run(agent.responses(SimpleNamespace(cookies={}), Response(), _body()))
+
+    assert ("cancel", "t1", "r1", True) in client.calls
+    assert ("delete", "t1") in client.calls
 
 
 class _FakeModelRequest:
@@ -729,13 +815,21 @@ class _FakeRunServerClient:
 
 
 class _FakeGraph:
-    context = None
-    state = None
+    def __init__(self, subagent_state=None, error=None):
+        self.subagent_state = subagent_state or {}
+        self.error = error
+        self.context = None
+        self.state = None
 
-    async def ainvoke(self, state, *, context):
+    async def astream(self, state, *, context, stream_mode):
+        assert stream_mode == "values"
         self.state = state
         self.context = context
-        return {
+        yield {**state, **self.subagent_state}
+        if self.error is not None:
+            raise self.error
+        yield {
+            **self.subagent_state,
             "messages": [
                 *state["messages"],
                 AIMessage(
@@ -745,8 +839,51 @@ class _FakeGraph:
                         "nemo_gym_cookies": {},
                     },
                 ),
-            ]
+            ],
         }
+
+
+class _FakeLangGraphClient:
+    """Stands in for `langgraph_sdk.get_client` and the client it returns."""
+
+    def __init__(self, thread_runs, *, stuck=(), fail_delete=()):
+        self.thread_runs = thread_runs
+        self.stuck = set(stuck)
+        self.fail_delete = set(fail_delete)
+        self.calls = []
+        self.urls = []
+        self.runs = SimpleNamespace(list=self._list_runs, cancel=self._cancel_run)
+        self.threads = SimpleNamespace(get_state=self._get_state, delete=self._delete_thread)
+
+    def __call__(self, *, url, headers):
+        self.urls.append(url)
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def _list_runs(self, thread_id, *, limit):
+        self.calls.append(("list", thread_id))
+        return [dict(run) for run in self.thread_runs[thread_id]]
+
+    async def _cancel_run(self, thread_id, run_id, *, wait):
+        self.calls.append(("cancel", thread_id, run_id, wait))
+        if thread_id not in self.stuck:
+            for run in self.thread_runs[thread_id]:
+                if run["run_id"] == run_id:
+                    run["status"] = "interrupted"
+
+    async def _get_state(self, thread_id):
+        self.calls.append(("get_state", thread_id))
+        return {"values": {"messages": [f"{thread_id} history"]}}
+
+    async def _delete_thread(self, thread_id):
+        self.calls.append(("delete", thread_id))
+        if thread_id in self.fail_delete:
+            raise RuntimeError("delete failed")
 
 
 class _ResponsesTestAgent(DecomposerAgent):
@@ -787,6 +924,55 @@ def _final_state():
             }
         },
     }
+
+
+def _subagent_types():
+    return [
+        {
+            "agent_type_id": "worker",
+            "description": "Worker subagent.",
+            "assistant_id": "worker",
+            "url": "http://subagents.test",
+        }
+    ]
+
+
+def _subagent_state(*thread_ids):
+    """Agents on the given threads; the manager collected each thread's first run only."""
+    return {
+        "agents": {
+            f"agent_{thread_id}": {
+                "agent_id": f"agent_{thread_id}",
+                "agent_type_id": "worker",
+                "assistant_id": "worker",
+                "thread_id": thread_id,
+                "created_at": 0.0,
+            }
+            for thread_id in thread_ids
+        },
+        "agent_runs": {
+            f"run_{thread_id}": {
+                "agent_run_id": f"run_{thread_id}",
+                "agent_id": f"agent_{thread_id}",
+                "run_id": f"r{thread_id.removeprefix('t')}",
+                "status": "responded",
+                "collected_at": 1.0,
+            }
+            for thread_id in thread_ids
+        },
+    }
+
+
+def _subagent_responses_agent(graph):
+    return _ResponsesTestAgent.model_construct(
+        config=SimpleNamespace(
+            resources_server=SimpleNamespace(name="resources"),
+            few_shot_message_factories=(),
+            join_gym_system_and_user_prompts=False,
+            subagent_types=_subagent_types(),
+        ),
+        graph=graph,
+    )
 
 
 def _body():

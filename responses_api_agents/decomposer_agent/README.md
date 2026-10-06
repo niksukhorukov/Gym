@@ -38,3 +38,12 @@ gym eval run --no-serve \
   --num-repeats 1 \
   --concurrency 1
 ```
+
+## Subagent Threads
+
+The subagent server keeps every thread in memory until it is deleted. When a
+rollout ends, including when the graph raises, the agent cancels the rollout's
+active subagent runs and deletes their threads. The rollout's
+`final_state["subagent_cleanup"]` records `deleted_threads`, `cancelled_runs`
+and `errors`. It also records `saved_threads`: the final state of each thread with
+a run the manager never collected, whose history the rollout would otherwise lose.

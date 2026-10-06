@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, TypedDict
@@ -21,6 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langgraph_sdk import get_client
 from pydantic import ConfigDict, Field, ImportString
 
 from nemo_gym.base_resources_server import (
@@ -56,6 +58,8 @@ MODEL_CALL_LIMIT_MESSAGE_PREFIX = "Model call limits exceeded:"
 NG_FAILURE_CLASS_KEY = "_ng_failure_class"
 NG_FAILURE_DETAIL_KEY = "_ng_failure_detail"
 TERMINAL_SUBAGENT_STATUSES = frozenset({"responded", "error", "timeout", "interrupted"})
+ACTIVE_SUBAGENT_RUN_STATUSES = frozenset({"pending", "running"})
+SUBAGENT_CLEANUP_TIMEOUT_SECONDS = 30
 
 
 class DecomposerRolloutValidationError(RuntimeError):
@@ -408,14 +412,26 @@ class DecomposerAgent(SimpleResponsesAPIAgent):
         few_shot_messages = [message for factory in self.config.few_shot_message_factories for message in factory()]
         initial_messages = [*few_shot_messages, *input_messages]
         initial_state = {"messages": initial_messages}
-        final_state = await self.graph.ainvoke(
-            initial_state,
-            context={
-                "body": body.model_dump(mode="json", exclude_unset=True),
-                "resource_server_url": self._resources_server_base_url(),
-                "resource_server_cookies": dict(request.cookies),
-            },
-        )
+        # Stream values instead of `ainvoke` to keep the last state when the graph raises,
+        # so the subagent threads it created are released either way.
+        final_state = None
+        try:
+            async for final_state in self.graph.astream(
+                initial_state,
+                context={
+                    "body": body.model_dump(mode="json", exclude_unset=True),
+                    "resource_server_url": self._resources_server_base_url(),
+                    "resource_server_cookies": dict(request.cookies),
+                },
+                stream_mode="values",
+            ):
+                pass
+        finally:
+            if final_state is not None:
+                cleanup = await _release_subagent_threads(final_state, self.config.subagent_types)
+                final_state["subagent_cleanup"] = cleanup
+                if cleanup["errors"]:
+                    print(f"Subagent cleanup errors: {cleanup['errors']}", flush=True)
         all_messages = final_state["messages"]
         output_messages = all_messages[len(initial_messages) :]
         output_items = _messages_to_items(output_messages)
@@ -697,6 +713,51 @@ def _validate_decomposer_rollout(
 
     if invalid_runs:
         raise UncollectedSubagentsError(", ".join(invalid_runs))
+
+
+async def _release_subagent_threads(
+    final_state: dict[str, Any],
+    subagent_types: Sequence[AgentType],
+) -> dict[str, Any]:
+    """Cancel the rollout's subagent runs and delete their threads from the subagent server.
+
+    The server keeps every thread in memory until it is deleted, and the rollout already
+    carries each collected run's messages. A thread with a run the manager never collected
+    keeps its final state here, because deleting the thread loses that history.
+    """
+    agent_types = {agent_type["agent_type_id"]: agent_type for agent_type in subagent_types}
+    collected = {
+        agent_run["run_id"]
+        for agent_run in (final_state.get("agent_runs") or {}).values()
+        if "collected_at" in agent_run
+    }
+    result: dict[str, Any] = {"deleted_threads": 0, "cancelled_runs": 0, "saved_threads": {}, "errors": []}
+
+    def call(awaitable: Awaitable[Any]) -> Awaitable[Any]:
+        return asyncio.wait_for(awaitable, SUBAGENT_CLEANUP_TIMEOUT_SECONDS)
+
+    for agent in (final_state.get("agents") or {}).values():
+        agent_type = agent_types[agent["agent_type_id"]]
+        thread_id = agent["thread_id"]
+        try:
+            async with get_client(url=agent_type.get("url"), headers=agent_type.get("headers")) as client:
+                runs = await call(client.runs.list(thread_id, limit=100))
+                active = [run for run in runs if run["status"] in ACTIVE_SUBAGENT_RUN_STATUSES]
+                for run in active:
+                    await call(client.runs.cancel(thread_id, run["run_id"], wait=True))
+                    result["cancelled_runs"] += 1
+                if active:
+                    runs = await call(client.runs.list(thread_id, limit=100))
+                    if any(run["status"] in ACTIVE_SUBAGENT_RUN_STATUSES for run in runs):
+                        raise RuntimeError("Subagent run still active after cancellation")
+                if any(run["run_id"] not in collected for run in runs):
+                    state = await call(client.threads.get_state(thread_id))
+                    result["saved_threads"][thread_id] = {"values": state["values"], "runs": runs}
+                await call(client.threads.delete(thread_id))
+                result["deleted_threads"] += 1
+        except Exception as error:
+            result["errors"].append(f"{thread_id}: {type(error).__name__}: {error}")
+    return result
 
 
 def _messages_to_items(messages: list[BaseMessage]) -> list[NeMoGymResponseInputItem | NeMoGymResponseOutputItem]:
