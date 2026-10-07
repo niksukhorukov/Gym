@@ -81,6 +81,17 @@ def test_input_to_messages_joins_system_and_user_prompts_when_enabled():
     assert messages == [HumanMessage(content="system prompt\n\nuser prompt")]
 
 
+def test_input_to_messages_drops_the_gym_system_prompt_when_enabled():
+    input_items = [
+        {"type": "message", "role": "system", "content": "system prompt"},
+        {"type": "message", "role": "user", "content": "user prompt"},
+    ]
+
+    assert _input_to_messages(input_items, drop_gym_system_prompt=True) == [HumanMessage(content="user prompt")]
+    with pytest.raises(ValueError, match="at most one"):
+        _input_to_messages(input_items, join_gym_system_and_user_prompts=True, drop_gym_system_prompt=True)
+
+
 def test_request_with_body_adds_body_to_model_settings():
     body = _body()
     request = _FakeModelRequest(
@@ -641,6 +652,7 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
             resources_server=SimpleNamespace(name="resources"),
             few_shot_message_factories=(),
             join_gym_system_and_user_prompts=False,
+            drop_gym_system_prompt=False,
             subagent_types=(),
         ),
         graph=graph,
@@ -659,6 +671,33 @@ def test_responses_omits_unset_body_fields_from_runtime_context():
     assert graph.state == {"messages": [HumanMessage(content="runtime prompt")]}
 
 
+def test_responses_drops_the_gym_system_prompt_but_keeps_it_for_subagents():
+    graph = _FakeGraph()
+    agent = _ResponsesTestAgent.model_construct(
+        config=SimpleNamespace(
+            resources_server=SimpleNamespace(name="resources"),
+            few_shot_message_factories=(),
+            join_gym_system_and_user_prompts=False,
+            drop_gym_system_prompt=True,
+            subagent_types=(),
+        ),
+        graph=graph,
+    )
+    input_items = [{"role": "system", "content": "domain policy"}, {"role": "user", "content": "runtime prompt"}]
+    body = NeMoGymResponseCreateParamsNonStreaming.model_validate({"input": input_items})
+
+    asyncio.run(
+        agent.responses(
+            SimpleNamespace(cookies={}),
+            Response(),
+            body,
+        )
+    )
+
+    assert graph.state == {"messages": [HumanMessage(content="runtime prompt")]}
+    assert graph.context["body"]["input"] == input_items
+
+
 def test_responses_prepends_configured_few_shot_messages():
     graph = _FakeGraph()
     few_shot_messages = [{"role": "user", "content": "few-shot prompt"}]
@@ -667,6 +706,7 @@ def test_responses_prepends_configured_few_shot_messages():
             resources_server=SimpleNamespace(name="resources"),
             few_shot_message_factories=(lambda: few_shot_messages,),
             join_gym_system_and_user_prompts=False,
+            drop_gym_system_prompt=False,
             subagent_types=(),
         ),
         graph=graph,
@@ -969,6 +1009,7 @@ def _subagent_responses_agent(graph):
             resources_server=SimpleNamespace(name="resources"),
             few_shot_message_factories=(),
             join_gym_system_and_user_prompts=False,
+            drop_gym_system_prompt=False,
             subagent_types=_subagent_types(),
         ),
         graph=graph,
