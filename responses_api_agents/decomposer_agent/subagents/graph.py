@@ -5,6 +5,7 @@ from typing import Any
 
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from decomposer.models import ChatVLLM
+from decomposer.run_budget import RunBudgetMiddleware
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -34,6 +35,8 @@ class NeMoGymSubagentMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        if request.state.get("shutdown_requested", False):
+            return await handler(request)
         context: dict[str, Any] = request.runtime.context
         body = context["body"]
         tools = [
@@ -169,6 +172,7 @@ def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
         model=model,
         tools=[],
         middleware=[
+            RunBudgetMiddleware(),
             NeMoGymSubagentMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=SUBAGENT_MAX_MODEL_CALLS,
