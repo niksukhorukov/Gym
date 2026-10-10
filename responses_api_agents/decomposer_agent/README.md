@@ -39,6 +39,20 @@ gym eval run --no-serve \
   --concurrency 1
 ```
 
+## Gym Input
+
+The agent's own system message is the Decomposer prompt, and a gym's `input` may
+carry a system message too. Two options decide what the manager gets from it:
+
+- `join_gym_system_and_user_prompts` (default `false`): an input of one system
+  and one user message becomes a single user message, `"{system}\n\n{user}"`.
+- `drop_gym_system_prompt` (default `false`): system messages are left out of the
+  manager's messages. Subagent graphs still receive the whole request body in the
+  runtime context, so they can read the gym's system message themselves.
+
+Setting both is an error. With neither, the gym's system message reaches the
+manager as a second system message, which Qwen chat templates reject.
+
 ## Subagent Threads
 
 The subagent server keeps every thread in memory until it is deleted. When a
