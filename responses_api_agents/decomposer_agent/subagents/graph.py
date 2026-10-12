@@ -5,7 +5,7 @@ from typing import Any
 
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from decomposer.models import ChatVLLM
-from decomposer.run_budget import RunBudgetMiddleware
+from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
 from httpx import AsyncClient, RequestError
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -17,6 +17,12 @@ from langchain.agents.middleware import (
 )
 from langchain_core.messages import ToolMessage
 from langgraph.graph.state import CompiledStateGraph
+
+
+class AgentContext(RunBudgetContext):
+    body: dict[str, Any]
+    resource_server_url: str
+    resource_server_cookies: dict[str, str]
 
 
 REQUEST_TIMEOUT_SECONDS = 300.0
@@ -169,6 +175,7 @@ def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
         },
     )
     return create_agent(
+        context_schema=AgentContext,
         model=model,
         tools=[],
         middleware=[
